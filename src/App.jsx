@@ -681,6 +681,9 @@ function DetModal({r,sess,addLog,reload,onClose,onUpd,cars,reses}) {
   const [depCurrency,setDepCurrency]=useState(r.currency||"ALL");
   const [depTx,setDepTx]=useState([]);
   const [returningDep,setReturningDep]=useState(false);
+  const [prepAmt,setPrepAmt]=useState("");
+  const [prepMethod,setPrepMethod]=useState("cash");
+  const [addingPrep,setAddingPrep]=useState(false);
 
   useEffect(()=>{
     sbAuthGet("car_settings","car_name=eq."+encodeURIComponent(cur.car_name),sess.token)
@@ -716,6 +719,27 @@ function DetModal({r,sess,addLog,reload,onClose,onUpd,cars,reses}) {
     } catch(e){ console.error("addToLedger ERROR:", e.message); }
   }
   const METHOD_LB={cash:"💵 Cash",pos:"💳 POS",transfer:"🏦 Bankë"};
+
+  async function doAddPrepayment(){
+    const a=Number(prepAmt);
+    if(!a||a<=0){alert("Vendos shumën e parapagimit");return;}
+    if(a>debt){alert("Parapagimi nuk mund të jetë më i madh se detyrimi: "+fmtM(debt,cur.currency));return;}
+    setAddingPrep(true);
+    try {
+      const newPaid=Number(cur.amount_paid||0)+a;
+      const isFull=newPaid>=Number(cur.total_price);
+      // Shto ne cash_ledger
+      await addToLedger(a,cur.currency,"prepayment","Parapagim ("+METHOD_LB[prepMethod]+"): "+cur.car_name+" - "+cur.client_name,cur.id,prepMethod);
+      // Perditeso amount_paid
+      await patch({
+        amount_paid:newPaid,
+        ...(isFull?{payment_status:"paguar",paid_at:new Date().toISOString(),paid_by:sess.profile?.username}:{})
+      });
+      addLog("Parapagim ("+METHOD_LB[prepMethod]+")",cur.car_name+" - "+cur.client_name+" "+fmtM(a,cur.currency));
+      setPrepAmt("");
+    } catch(e){alert(e.message);}
+    setAddingPrep(false);
+  }
   async function doDeliver(){
     const now=new Date().toISOString(), time=new Date().toTimeString().slice(0,5);
     await patch({status:"Dorëzuar",deliv_at:now,deliv_by:sess.profile?.username,deliv_time:time,km_out:kmOut?Number(kmOut):null});
@@ -817,6 +841,45 @@ function DetModal({r,sess,addLog,reload,onClose,onUpd,cars,reses}) {
           <Badge s={cur.status}/>
         </div>
       </div>
+
+      {/* Parapagim */}
+      {!done&&!paid&&(
+        <div style={{padding:"10px 14px",borderRadius:9,marginBottom:12,background:"#f0fdf4",border:"1px solid #bbf7d0"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+            <span style={{fontSize:16}}>🟡</span>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:700,fontSize:13,color:"#166534"}}>Parapagim</div>
+              {amountPaid>0
+                ?<div style={{fontSize:11,color:"#166534"}}>Paguar deri tani: <strong>{fmtM(amountPaid,cur.currency)}</strong> · Mbetet: <strong>{fmtM(debt,cur.currency)}</strong></div>
+                :<div style={{fontSize:11,color:"#94a3b8"}}>Nuk ka parapagim të regjistruar</div>
+              }
+            </div>
+          </div>
+          <div style={{display:"flex",gap:5,marginBottom:8}}>
+            {Object.entries(METHOD_LB).map(([m,lb])=>(
+              <button key={m} onClick={()=>setPrepMethod(m)} style={{
+                flex:1,border:"1px solid "+(prepMethod===m?"#16a34a":"#e2e8f0"),borderRadius:7,padding:"6px 4px",
+                fontSize:11,fontWeight:700,cursor:"pointer",
+                background:prepMethod===m?"#dcfce7":"#fff",color:prepMethod===m?"#166534":"#64748b"
+              }}>{lb}</button>
+            ))}
+          </div>
+          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+            <input type="number" value={prepAmt} onChange={e=>setPrepAmt(e.target.value)}
+              placeholder={"Shumë parapagim (max "+fmtM(debt,cur.currency)+")"}
+              style={{...FL,flex:1,fontSize:12,padding:"7px 10px"}}/>
+            <button onClick={doAddPrepayment} disabled={addingPrep||!prepAmt}
+              style={{...PB,background:"#16a34a",fontSize:12,padding:"7px 14px",whiteSpace:"nowrap"}}>
+              {addingPrep?"...":"🟡 Shto Parapagim"}
+            </button>
+          </div>
+          {prepAmt&&Number(prepAmt)>0&&debt>0&&(
+            <div style={{marginTop:6,fontSize:11,color:"#166534",fontWeight:600}}>
+              Pas parapagimit: detyrim final = {fmtM(Math.max(0,debt-Number(prepAmt)),cur.currency)}
+            </div>
+          )}
+        </div>
+      )}
 
       <div style={{padding:"10px 14px",borderRadius:9,marginBottom:12,background:paid?"#dcfce7":"#fef3c7",border:"1px solid "+(paid?"#bbf7d0":"#fde68a")}}>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
