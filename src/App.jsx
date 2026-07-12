@@ -715,7 +715,7 @@ function DetModal({r,sess,addLog,reload,onClose,onUpd,cars,reses}) {
       }, sess.token);
     } catch(e){ console.error("addToLedger ERROR:", e.message); }
   }
-  const METHOD_LB={cash:"💵 Cash",pos:"💳 POS",transfer:"🏦 Transfertë"};
+  const METHOD_LB={cash:"💵 Cash",pos:"💳 POS",transfer:"🏦 Bankë"};
   async function doDeliver(){
     const now=new Date().toISOString(), time=new Date().toTimeString().slice(0,5);
     await patch({status:"Dorëzuar",deliv_at:now,deliv_by:sess.profile?.username,deliv_time:time,km_out:kmOut?Number(kmOut):null});
@@ -1381,20 +1381,30 @@ function OccupancyChart({reses, cars, carNames}) {
 }
 
 // ─── CASHBOX ──────────────────────────────────────────────────────────────────
+// ─── CONSTANTS PER LLOGARITE ─────────────────────────────────────────────────
+const ACCOUNTS = [
+  { id:"cash",     label:"💵 Cash",       color:"#1d4ed8", bg:"linear-gradient(135deg,#1e3a5f,#1d4ed8)", shadow:"rgba(29,78,216,0.3)"  },
+  { id:"pos",      label:"💳 POS",        color:"#7c3aed", bg:"linear-gradient(135deg,#4c1d95,#7c3aed)", shadow:"rgba(124,58,237,0.3)" },
+  { id:"transfer", label:"🏦 Bankë",      color:"#059669", bg:"linear-gradient(135deg,#064e3b,#059669)", shadow:"rgba(5,150,105,0.3)"  },
+];
+const ACC_ID = a => a?.method||"cash";
+const ACC_INFO = id => ACCOUNTS.find(a=>a.id===id)||ACCOUNTS[0];
+
 function ArkPage({sess,reload,reloadTick,addLog}) {
   const [ledger,setLedger]=useState([]);
   const [exps,setExps]=useState([]);
   const [cars,setCars]=useState([]);
   const [loading,setLoading]=useState(true);
-  const [arkTab,setArkTab]=useState("lek");
+  // arkTab = "cash_ALL" | "cash_EUR" | "pos_ALL" | "pos_EUR" | "transfer_ALL" | "transfer_EUR"
+  const [arkTab,setArkTab]=useState("cash_ALL");
   const [dateFrom,setDateFrom]=useState("");
   const [dateTo,setDateTo]=useState("");
   const [showA,setShowA]=useState(false);
   const [showT,setShowT]=useState(false);
   const [showE,setShowE]=useState(false);
-  const [af,setAf]=useState({amount:"",currency:"ALL",description:"",type:"in"});
+  const [af,setAf]=useState({amount:"",currency:"ALL",method:"cash",description:"",type:"in"});
   const [tf,setTf]=useState({from:"ALL",amount:"",rate:"108"});
-  const [ef,setEf]=useState({description:"",amount:"",currency:"ALL",category:"Mirëmbajtje",car_name:"",expense_date:todayY()});
+  const [ef,setEf]=useState({description:"",amount:"",currency:"ALL",method:"cash",category:"Mirëmbajtje",catCustom:"",car_name:"",expense_date:todayY()});
 
   useEffect(()=>{
     setLoading(true);
@@ -1402,242 +1412,198 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
       .then(([l,e,c])=>{setLedger(l);setExps(e);setCars(c);setLoading(false);}).catch(()=>setLoading(false));
   },[reloadTick,sess.token]);
 
-  // Compute balances from ledger
-  const cashLek=ledger.filter(l=>l.currency==="ALL").reduce((s,l)=>s+Number(l.amount),0);
-  const cashEur=ledger.filter(l=>l.currency==="EUR").reduce((s,l)=>s+Number(l.amount),0);
+  // Balanca per cdo llogari+monedhë
+  function getBalance(method,currency){
+    return ledger.filter(l=>(l.method||"cash")===method&&l.currency===currency).reduce((s,l)=>s+Number(l.amount),0);
+  }
 
   async function doAdd(){
     if(!af.amount) return;
     const a=Number(af.amount)*(af.type==="in"?1:-1);
     try {
-      await sbAuthPost("cash_ledger",{currency:af.currency,amount:a,type:af.type==="in"?"manual_in":"manual_out",description:af.description,created_by:sess.profile?.username},sess.token);
-      addLog("Arkë "+(af.type==="in"?"Hyrje":"Dalje"),fmtM(Math.abs(a),af.currency)+" - "+af.description);
-      reload(); setShowA(false); setAf({amount:"",currency:"ALL",description:"",type:"in"});
+      await sbAuthPost("cash_ledger",{currency:af.currency,amount:a,method:af.method,type:af.type==="in"?"manual_in":"manual_out",description:af.description,created_by:sess.profile?.username},sess.token);
+      addLog("Arkë "+(af.type==="in"?"Hyrje":"Dalje")+" ("+ACC_INFO(af.method).label+")",fmtM(Math.abs(a),af.currency)+" - "+af.description);
+      reload(); setShowA(false); setAf({amount:"",currency:"ALL",method:"cash",description:"",type:"in"});
     } catch(e){alert(e.message);}
   }
+
   async function doTransfer(){
     const a=Number(tf.amount), rate=Number(tf.rate);
     if(!a||!rate) return;
+    // Kalim ndermjet monedhave (brenda te njejtes llogari cash)
     try {
       if(tf.from==="ALL"){
-        await sbAuthPost("cash_ledger",{currency:"ALL",amount:-a,type:"transfer",description:"Kalim → EUR (kurs "+rate+")",created_by:sess.profile?.username},sess.token);
-        await sbAuthPost("cash_ledger",{currency:"EUR",amount:a/rate,type:"transfer",description:"Kalim ← ALL (kurs "+rate+")",created_by:sess.profile?.username},sess.token);
+        await sbAuthPost("cash_ledger",{currency:"ALL",amount:-a,method:"cash",type:"transfer",description:"Kalim → EUR (kurs "+rate+")",created_by:sess.profile?.username},sess.token);
+        await sbAuthPost("cash_ledger",{currency:"EUR",amount:a/rate,method:"cash",type:"transfer",description:"Kalim ← ALL (kurs "+rate+")",created_by:sess.profile?.username},sess.token);
         addLog("Kalim Arke",a.toLocaleString()+" L → €"+(a/rate).toFixed(2));
       } else {
-        await sbAuthPost("cash_ledger",{currency:"EUR",amount:-a,type:"transfer",description:"Kalim → ALL (kurs "+rate+")",created_by:sess.profile?.username},sess.token);
-        await sbAuthPost("cash_ledger",{currency:"ALL",amount:a*rate,type:"transfer",description:"Kalim ← EUR (kurs "+rate+")",created_by:sess.profile?.username},sess.token);
+        await sbAuthPost("cash_ledger",{currency:"EUR",amount:-a,method:"cash",type:"transfer",description:"Kalim → ALL (kurs "+rate+")",created_by:sess.profile?.username},sess.token);
+        await sbAuthPost("cash_ledger",{currency:"ALL",amount:a*rate,method:"cash",type:"transfer",description:"Kalim ← EUR (kurs "+rate+")",created_by:sess.profile?.username},sess.token);
         addLog("Kalim Arke","€"+a+" → "+(a*rate).toLocaleString()+" L");
       }
       reload(); setShowT(false); setTf({from:"ALL",amount:"",rate:"108"});
     } catch(e){alert(e.message);}
   }
+
   async function doAddExp(){
     if(!ef.description||!ef.amount) return;
     const a=Number(ef.amount);
+    const finalCat = ef.category==="__custom__" ? ef.catCustom||"Tjetër" : ef.category;
     try {
-      await sbAuthPost("expenses",{...ef,amount:a,created_by:sess.profile?.username},sess.token);
-      await sbAuthPost("cash_ledger",{currency:ef.currency,amount:-a,type:"expense",description:"Shpenzim: "+ef.description+(ef.car_name?" ("+ef.car_name+")":""),created_by:sess.profile?.username},sess.token);
-      addLog("Shto Shpenzim",ef.description+" "+fmtM(a,ef.currency));
-      reload(); setShowE(false); setEf({description:"",amount:"",currency:"ALL",category:"Mirëmbajtje",car_name:"",expense_date:todayY()});
+      await sbAuthPost("expenses",{...ef,category:finalCat,amount:a,created_by:sess.profile?.username},sess.token);
+      await sbAuthPost("cash_ledger",{currency:ef.currency,amount:-a,method:ef.method,type:"expense",description:"Shpenzim: "+ef.description+(ef.car_name?" ("+ef.car_name+")":""),created_by:sess.profile?.username},sess.token);
+      addLog("Shto Shpenzim ("+ACC_INFO(ef.method).label+")",ef.description+" "+fmtM(a,ef.currency));
+      reload(); setShowE(false); setEf({description:"",amount:"",currency:"ALL",method:"cash",category:"Mirëmbajtje",catCustom:"",car_name:"",expense_date:todayY()});
     } catch(e){alert(e.message);}
   }
-  // Fshirja e shpenzimeve/levizjeve te arkes eshte e ndaluar qellimisht per integritet te regjistrit financiar.
 
-  // Build statement rows - sorted ascending for running balance
-  const curCur=arkTab==="lek"?"ALL":"EUR";
-  const isL=curCur==="ALL";
-  const allCurRows=ledger.filter(l=>l.currency===curCur).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
-  // Opening balance = sum of all rows BEFORE dateFrom
-  const openingBal=dateFrom
-    ? allCurRows.filter(l=>l.created_at&&l.created_at.slice(0,10)<dateFrom).reduce((s,l)=>s+Number(l.amount),0)
-    : 0;
-  // Rows within period
-  const rows=allCurRows.filter(l=>{
-    const d=l.created_at?l.created_at.slice(0,10):"";
-    if(dateFrom&&d<dateFrom) return false;
-    if(dateTo&&d>dateTo) return false;
-    return true;
-  });
-  const rowTotal=rows.reduce((s,l)=>s+Number(l.amount),0);
-  const closingBal=openingBal+rowTotal;
+  // Statement per tab-in aktual
+  const [tabMethod,tabCur] = arkTab.split("_");
+  const isL = tabCur==="ALL";
+  const allTabRows = ledger.filter(l=>(l.method||"cash")===tabMethod&&l.currency===tabCur).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
+  const openingBal = dateFrom ? allTabRows.filter(l=>l.created_at&&l.created_at.slice(0,10)<dateFrom).reduce((s,l)=>s+Number(l.amount),0) : 0;
+  const rows = allTabRows.filter(l=>{ const d=l.created_at?l.created_at.slice(0,10):""; if(dateFrom&&d<dateFrom)return false; if(dateTo&&d>dateTo)return false; return true; });
+  const rowTotal = rows.reduce((s,l)=>s+Number(l.amount),0);
+  const closingBal = openingBal+rowTotal;
 
-  // Compute running balance for display
-  function getRowsWithBalance(){
-    let bal=openingBal;
-    return rows.map(r=>{
-      bal+=Number(r.amount);
-      return {...r, runBal:bal};
-    });
-  }
-
+  function getRowsWithBalance(){ let bal=openingBal; return rows.map(r=>{bal+=Number(r.amount);return{...r,runBal:bal};}); }
   function fmt2(v){ return isL?v.toLocaleString("sq-AL")+" L":"€"+Math.abs(v).toFixed(2); }
-  function fmtSigned(v){ return (v>=0?"+":"-")+(isL?Math.abs(v).toLocaleString("sq-AL")+" L":"€"+Math.abs(v).toFixed(2)); }
 
   function exportCSV(){
-    const nl="\n";
-    const rowsBal=getRowsWithBalance();
-    let csv="Data,Lloji,Përshkrimi,Debi,Kredi,Gjendje"+nl;
-    if(dateFrom) csv+='"'+(dateFrom||"")+'","","Gjendje Hapëse","","","'+fmt2(openingBal)+'"'+nl;
+    const nl="\n"; const rowsBal=getRowsWithBalance();
+    let csv="Data,Llogaria,Lloji,Përshkrimi,Debi,Kredi,Gjendje"+nl;
+    if(dateFrom) csv+='"'+dateFrom+'","","","Gjendje Hapëse","","","'+fmt2(openingBal)+'"'+nl;
     rowsBal.forEach(r=>{
       const pos=Number(r.amount)>=0;
       const debi=pos?"":Math.abs(Number(r.amount)).toFixed(isL?0:2)+(isL?" L":"");
       const kredi=pos?Math.abs(Number(r.amount)).toFixed(isL?0:2)+(isL?" L":""):"";
-      const bal=fmt2(r.runBal);
-      const dt=r.created_at?r.created_at.slice(0,10):"";
-      csv+='"'+dt+'","'+r.type+'","'+(r.description||"")+'","'+debi+'","'+kredi+'","'+bal+'"'+nl;
+      csv+='"'+(r.created_at||"").slice(0,10)+'","'+(ACC_INFO(r.method||"cash").label)+'","'+r.type+'","'+(r.description||"")+'","'+debi+'","'+kredi+'","'+fmt2(r.runBal)+'"'+nl;
     });
-    csv+=nl+'"","","Gjendje Mbyllëse","","","'+fmt2(closingBal)+'"';
-    const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement("a"); a.href=url; a.download="statement_"+(isL?"lek":"eur")+"_"+todayY()+".csv"; a.click();
-    URL.revokeObjectURL(url);
+    csv+=nl+'"","","","Gjendje Mbyllëse","","","'+fmt2(closingBal)+'"';
+    const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"}); const url=URL.createObjectURL(blob);
+    const a=document.createElement("a"); a.href=url; a.download="statement_"+tabMethod+"_"+tabCur+"_"+todayY()+".csv"; a.click(); URL.revokeObjectURL(url);
   }
 
   function exportPDF(){
     const rowsBal=getRowsWithBalance();
-    const closeBg=closingBal>=0?"#dcfce7":"#fee2e2";
-    const closeCol=closingBal>=0?"#166534":"#991b1b";
-    const period=(dateFrom||dateTo)
-      ?('<p style="margin:4px 0 0;opacity:.8;font-size:13px">Periudha: '+(dateFrom||"fillimi")+" → "+(dateTo||"sot")+"</p>")
-      :"";
-
-    // Opening row
-    const openRow=dateFrom
-      ?('<tr style="background:#f0f9ff;border-bottom:2px solid #bfdbfe"><td colspan="3" style="padding:10px;font-size:12px;font-weight:700;color:#1e40af">Gjendje Hapëse ('+(dateFrom)+')</td>'
-        +'<td style="padding:10px;font-size:13px;font-weight:800;color:#1e40af;text-align:right">'+fmt2(openingBal)+'</td></tr>')
-      :"";
-
+    const accInfo=ACC_INFO(tabMethod);
+    const closeBg=closingBal>=0?"#dcfce7":"#fee2e2"; const closeCol=closingBal>=0?"#166534":"#991b1b";
+    const period=(dateFrom||dateTo)?('<p style="margin:4px 0 0;opacity:.8;font-size:13px">Periudha: '+(dateFrom||"fillimi")+" → "+(dateTo||"sot")+"</p>"):"";
+    const openRow=dateFrom?('<tr style="background:#f0f9ff;border-bottom:2px solid #bfdbfe"><td colspan="4" style="padding:10px;font-size:12px;font-weight:700;color:#1e40af">Gjendje Hapëse ('+dateFrom+')</td><td style="padding:10px;font-size:13px;font-weight:800;color:#1e40af;text-align:right">'+fmt2(openingBal)+'</td></tr>'):"";
     const rowsHtml=rowsBal.map((r,i)=>{
-      const pos=Number(r.amount)>=0;
-      const color=pos?"#166534":"#991b1b";
-      const bg=i%2===0?"#fff":"#f9fafb";
-      const dt=r.created_at?r.created_at.slice(0,10):"";
+      const pos=Number(r.amount)>=0; const bg=i%2===0?"#fff":"#f9fafb";
       const debi=pos?"":('<span style="color:#991b1b;font-weight:700">-'+Math.abs(Number(r.amount)).toFixed(isL?0:2)+(isL?" L":"€")+'</span>');
       const kredi=pos?('<span style="color:#166534;font-weight:700">+'+Math.abs(Number(r.amount)).toFixed(isL?0:2)+(isL?" L":"€")+'</span>'):"";
-      const balColor=r.runBal>=0?"#1e40af":"#991b1b";
-      return '<tr style="background:'+bg+'">'
-        +'<td style="padding:8px 10px;font-size:11px;color:#64748b;white-space:nowrap">'+dt+'</td>'
-        +'<td style="padding:8px;font-size:11px;color:#374151">'+r.type+'</td>'
-        +'<td style="padding:8px;font-size:12px;color:#0f172a">'+(r.description||"")+'</td>'
-        +'<td style="padding:8px;font-size:12px;text-align:right">'+(pos?"":debi)+'</td>'
-        +'<td style="padding:8px;font-size:12px;text-align:right">'+(pos?kredi:"")+'</td>'
-        +'<td style="padding:8px;font-size:12px;font-weight:700;text-align:right;color:'+balColor+'">'+fmt2(r.runBal)+'</td>'
-        +'</tr>';
+      return '<tr style="background:'+bg+'"><td style="padding:8px 10px;font-size:11px;color:#64748b">'+(r.created_at||"").slice(0,10)+'</td><td style="padding:8px;font-size:11px">'+r.type+'</td><td style="padding:8px;font-size:12px">'+(r.description||"")+'</td><td style="padding:8px;text-align:right">'+(pos?"":debi)+'</td><td style="padding:8px;text-align:right">'+(pos?kredi:"")+'</td><td style="padding:8px;font-weight:700;text-align:right;color:'+(r.runBal>=0?"#1e40af":"#991b1b")+'">'+fmt2(r.runBal)+'</td></tr>';
     }).join("");
-
-    const closeDateStr=dateTo?" ("+dateTo+")":"";
-    const closeBorderColor=closingBal>=0?"#bbf7d0":"#fecaca";
-    const closeRow='<tr style="background:'+closeBg+';border-top:2px solid '+closeBorderColor+'">'
-      +'<td colspan="4" style="padding:10px;font-size:13px;font-weight:800;color:'+closeCol+'">Gjendje Mbyllëse'+closeDateStr+'</td>'
-      +'<td colspan="2" style="padding:10px;font-size:15px;font-weight:800;color:'+closeCol+';text-align:right">'+fmt2(closingBal)+'</td></tr>';
-
-    const html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Statement '+(isL?"Lekë":"Euro")+'</title>'
-      +'<style>body{font-family:Arial,sans-serif;margin:0;padding:24px;color:#0f172a}'
-      +'.hdr{background:#0f172a;color:#fff;padding:20px 24px;border-radius:10px;margin-bottom:16px}'
-      +'table{width:100%;border-collapse:collapse;font-size:12px}'
-      +'th{background:#1e293b;color:#fff;padding:10px;font-size:11px;text-align:left;font-weight:600}'
-      +'th:nth-child(4),th:nth-child(5),th:nth-child(6){text-align:right}'
-      +'@media print{body{padding:10px}}</style>'
-      +'</head><body>'
-      +'<div class="hdr"><h2 style="margin:0;font-size:18px">🏦 Bank Statement — '+(isL?"LEKË":"EURO")+'</h2>'
-      +'<p style="margin:4px 0 0;opacity:.7;font-size:12px">Car Rental Manager · Gjeneruar: '+nowStr()+'</p>'
-      +period+'</div>'
-      +'<table><thead><tr>'
-      +'<th style="width:90px">Data</th><th style="width:100px">Lloji</th><th>Përshkrimi</th>'
-      +'<th style="width:100px;text-align:right">Debi</th>'
-      +'<th style="width:100px;text-align:right">Kredi</th>'
-      +'<th style="width:110px;text-align:right">Gjendje</th>'
-      +'</tr></thead><tbody>'
-      +openRow+rowsHtml+closeRow
-      +'</tbody></table></body></html>';
-    const w=window.open("","_blank");
-    if(w){w.document.write(html);w.document.close();setTimeout(()=>w.print(),500);}
+    const closeRow='<tr style="background:'+closeBg+';border-top:2px solid '+(closingBal>=0?"#bbf7d0":"#fecaca")+'"><td colspan="4" style="padding:10px;font-size:13px;font-weight:800;color:'+closeCol+'">Gjendje Mbyllëse'+(dateTo?" ("+dateTo+")")+'</td><td colspan="2" style="padding:10px;font-size:15px;font-weight:800;color:'+closeCol+';text-align:right">'+fmt2(closingBal)+'</td></tr>';
+    const html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Statement '+accInfo.label+'</title><style>body{font-family:Arial,sans-serif;margin:0;padding:24px;color:#0f172a}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#1e293b;color:#fff;padding:10px;font-size:11px;text-align:left}th:nth-child(4),th:nth-child(5),th:nth-child(6){text-align:right}@media print{body{padding:10px}}</style></head><body><div style="background:#0f172a;color:#fff;padding:20px 24px;border-radius:10px;margin-bottom:16px"><h2 style="margin:0;font-size:18px">🏦 Statement — '+accInfo.label+' '+tabCur+'</h2><p style="margin:4px 0 0;opacity:.7;font-size:12px">Car Rental Manager · Gjeneruar: '+nowStr()+'</p>'+period+'</div><table><thead><tr><th style="width:90px">Data</th><th style="width:100px">Lloji</th><th>Përshkrimi</th><th style="width:100px;text-align:right">Debi</th><th style="width:100px;text-align:right">Kredi</th><th style="width:110px;text-align:right">Gjendje</th></tr></thead><tbody>'+openRow+rowsHtml+closeRow+'</tbody></table></body></html>';
+    const w=window.open("","_blank"); if(w){w.document.write(html);w.document.close();setTimeout(()=>w.print(),500);}
   }
 
   if(loading) return <Spin/>;
   const carNames=cars.map(c=>c.name);
 
   return (
-    <div style={{padding:14,maxWidth:860,margin:"0 auto"}}>
-      <h2 style={{margin:"0 0 14px",fontSize:17,fontWeight:700,color:"#0f172a"}}>🏦 Arkë</h2>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-        <div onClick={()=>setArkTab("lek")} style={{background:"linear-gradient(135deg,#1e3a5f,#1d4ed8)",borderRadius:14,padding:"16px 14px",color:"#fff",boxShadow:"0 4px 16px rgba(29,78,216,0.3)",cursor:"pointer",border:arkTab==="lek"?"3px solid #93c5fd":"3px solid transparent"}}>
-          <div style={{fontSize:10,opacity:0.8,letterSpacing:1,fontWeight:700}}>ARKË LEKË</div>
-          <div style={{fontSize:22,fontWeight:800,marginTop:4,lineHeight:1}}>{cashLek.toLocaleString("sq-AL")}</div>
-          <div style={{fontSize:10,opacity:0.6,marginTop:2}}>ALL</div>
-        </div>
-        <div onClick={()=>setArkTab("eur")} style={{background:"linear-gradient(135deg,#064e3b,#059669)",borderRadius:14,padding:"16px 14px",color:"#fff",boxShadow:"0 4px 16px rgba(5,150,105,0.3)",cursor:"pointer",border:arkTab==="eur"?"3px solid #6ee7b7":"3px solid transparent"}}>
-          <div style={{fontSize:10,opacity:0.8,letterSpacing:1,fontWeight:700}}>ARKË EURO</div>
-          <div style={{fontSize:22,fontWeight:800,marginTop:4,lineHeight:1}}>{cashEur.toFixed(2)}</div>
-          <div style={{fontSize:10,opacity:0.6,marginTop:2}}>EUR</div>
-        </div>
+    <div style={{padding:14,maxWidth:900,margin:"0 auto"}}>
+      <h2 style={{margin:"0 0 14px",fontSize:17,fontWeight:700,color:"#0f172a"}}>🏦 Arkë & Llogaritë</h2>
+
+      {/* Balanca per llogari — 3 llogari x 2 monedha = 6 karta */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
+        {ACCOUNTS.map(acc=>(
+          <div key={acc.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,0.06)"}}>
+            <div style={{background:acc.bg,padding:"10px 14px",color:"#fff"}}>
+              <div style={{fontSize:12,fontWeight:800,letterSpacing:0.5}}>{acc.label}</div>
+            </div>
+            {["ALL","EUR"].map(cur=>{
+              const bal=getBalance(acc.id,cur);
+              const tabKey=acc.id+"_"+cur;
+              const isActive=arkTab===tabKey;
+              return (
+                <div key={cur} onClick={()=>setArkTab(tabKey)}
+                  style={{padding:"10px 14px",cursor:"pointer",borderBottom:"1px solid #f1f5f9",background:isActive?"#f0f9ff":"#fff",borderLeft:isActive?"3px solid "+acc.color:"3px solid transparent"}}>
+                  <div style={{fontSize:10,color:"#94a3b8",fontWeight:600}}>{cur==="ALL"?"LEKË":"EURO"}</div>
+                  <div style={{fontSize:17,fontWeight:800,color:bal>=0?acc.color:"#dc2626",marginTop:2}}>
+                    {cur==="ALL"?bal.toLocaleString("sq-AL")+" L":"€"+bal.toFixed(2)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
-        <button onClick={()=>{setAf(f=>({...f,type:"in"}));setShowA(true)}} style={{...PB,width:"100%",justifyContent:"center",display:"flex",alignItems:"center",gap:4}}>📥 Hyrje</button>
-        <button onClick={()=>{setAf(f=>({...f,type:"out"}));setShowA(true)}} style={{...PB,background:"#dc2626",width:"100%",justifyContent:"center",display:"flex",alignItems:"center",gap:4}}>📤 Dalje</button>
-        <button onClick={()=>setShowT(true)} style={{...PB,background:"#7c3aed",width:"100%",justifyContent:"center",display:"flex",alignItems:"center",gap:4}}>🔄 Kalim</button>
-        <button onClick={()=>setShowE(true)} style={{...PB,background:"#ea580c",width:"100%",justifyContent:"center",display:"flex",alignItems:"center",gap:4}}>➖ Shpenzim</button>
+      {/* Butonat e veprimeve */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
+        <button onClick={()=>{setAf(f=>({...f,type:"in"}));setShowA(true)}} style={{...PB,width:"100%",fontSize:12,padding:"8px 4px"}}>📥 Hyrje</button>
+        <button onClick={()=>{setAf(f=>({...f,type:"out"}));setShowA(true)}} style={{...PB,background:"#dc2626",width:"100%",fontSize:12,padding:"8px 4px"}}>📤 Dalje</button>
+        <button onClick={()=>setShowT(true)} style={{...PB,background:"#7c3aed",width:"100%",fontSize:12,padding:"8px 4px"}}>🔄 Kalim Monedhë</button>
+        <button onClick={()=>setShowE(true)} style={{...PB,background:"#ea580c",width:"100%",fontSize:12,padding:"8px 4px"}}>➖ Shpenzim</button>
       </div>
 
+      {/* Statement per tab-in aktual */}
       <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,overflow:"hidden"}}>
-        <div style={{background:arkTab==="lek"?"#0f172a":"#064e3b",color:"#fff",padding:"10px 12px"}}>
-          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
-            <span style={{fontWeight:700,fontSize:13,flex:1}}>📋 Statement {arkTab==="lek"?"Lekë":"Euro"}</span>
-            <button onClick={exportCSV} style={{padding:"5px 10px",borderRadius:7,background:"#16a34a",border:"none",color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}}>⬇️ CSV</button>
-            <button onClick={exportPDF} style={{padding:"5px 10px",borderRadius:7,background:"#dc2626",border:"none",color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}}>🖨️ PDF</button>
+        <div style={{background:ACC_INFO(tabMethod).bg,color:"#fff",padding:"10px 14px"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+            <span style={{fontWeight:700,fontSize:13,flex:1}}>📋 {ACC_INFO(tabMethod).label} — {isL?"Lekë":"Euro"}</span>
+            <button onClick={exportCSV} style={{padding:"5px 10px",borderRadius:7,background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}}>⬇️ CSV</button>
+            <button onClick={exportPDF} style={{padding:"5px 10px",borderRadius:7,background:"rgba(220,38,38,0.7)",border:"none",color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}}>🖨️ PDF</button>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
             <DateInput value={dateFrom} onChange={setDateFrom} style={{flex:1,padding:"5px 6px",borderRadius:6,border:"1px solid rgba(255,255,255,0.3)",background:"rgba(255,255,255,0.1)",color:"#fff",fontSize:11,fontFamily:"inherit",minWidth:0}}/>
             <span style={{fontSize:10,opacity:0.7,flexShrink:0}}>→</span>
             <DateInput value={dateTo} onChange={setDateTo} style={{flex:1,padding:"5px 6px",borderRadius:6,border:"1px solid rgba(255,255,255,0.3)",background:"rgba(255,255,255,0.1)",color:"#fff",fontSize:11,fontFamily:"inherit",minWidth:0}}/>
-            {(dateFrom||dateTo)&&<button onClick={()=>{setDateFrom("");setDateTo("");}} style={{padding:"4px 8px",borderRadius:5,background:"rgba(255,255,255,0.15)",border:"none",color:"#fff",fontSize:12,cursor:"pointer",flexShrink:0}}>✕</button>}
+            {(dateFrom||dateTo)&&<button onClick={()=>{setDateFrom("");setDateTo("");}} style={{padding:"4px 8px",borderRadius:5,background:"rgba(255,255,255,0.15)",border:"none",color:"#fff",fontSize:12,cursor:"pointer"}}>✕</button>}
           </div>
         </div>
-        {/* Summary bar */}
-        <div style={{padding:"10px 16px",background:"#f8fafc",borderBottom:"1px solid #e2e8f0",display:"flex",gap:16,flexWrap:"wrap",alignItems:"center"}}>
-          {dateFrom&&<div style={{fontSize:12}}><span style={{color:"#94a3b8"}}>Gjendje Hapëse: </span><span style={{fontWeight:700,color:"#1e40af"}}>{isL?openingBal.toLocaleString("sq-AL")+" L":"€"+openingBal.toFixed(2)}</span></div>}
+        <div style={{padding:"8px 16px",background:"#f8fafc",borderBottom:"1px solid #e2e8f0",display:"flex",gap:14,flexWrap:"wrap",alignItems:"center"}}>
+          {dateFrom&&<div style={{fontSize:12}}><span style={{color:"#94a3b8"}}>Gjendje Hapëse: </span><span style={{fontWeight:700,color:"#1e40af"}}>{fmt2(openingBal)}</span></div>}
           <div style={{fontSize:12}}><span style={{color:"#94a3b8"}}>Veprime: </span><span style={{fontWeight:700}}>{rows.length}</span></div>
           <div style={{flex:1}}/>
-          <div style={{fontSize:13,fontWeight:800,color:closingBal>=0?"#16a34a":"#dc2626"}}>Gjendje: {isL?closingBal.toLocaleString("sq-AL")+" L":"€"+closingBal.toFixed(2)}</div>
+          <div style={{fontSize:13,fontWeight:800,color:closingBal>=0?"#16a34a":"#dc2626"}}>Gjendje: {fmt2(closingBal)}</div>
         </div>
         {rows.length===0
-          ? <div style={{padding:32,textAlign:"center",color:"#94a3b8"}}>Asnjë transaksion{dateFrom||dateTo?" për periudhën e zgjedhur":""}.</div>
-          : <div style={{maxHeight:440,overflowY:"auto"}}>
-            {/* Opening balance row */}
-            {dateFrom&&<div style={{padding:"10px 16px",display:"flex",gap:12,alignItems:"center",background:"#eff6ff",borderBottom:"2px solid #bfdbfe"}}>
-              <div style={{width:32,height:32,borderRadius:"50%",background:"#dbeafe",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>📋</div>
-              <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:"#1e40af"}}>Gjendje Hapëse</div><div style={{fontSize:11,color:"#64748b"}}>{dateFrom}</div></div>
-              <div style={{fontWeight:800,fontSize:14,color:"#1e40af"}}>{isL?openingBal.toLocaleString("sq-AL")+" L":"€"+openingBal.toFixed(2)}</div>
+          ?<div style={{padding:28,textAlign:"center",color:"#94a3b8",fontSize:13}}>Asnjë transaksion{dateFrom||dateTo?" për periudhën e zgjedhur":""}.</div>
+          :<div style={{maxHeight:420,overflowY:"auto"}}>
+            {dateFrom&&<div style={{padding:"10px 16px",display:"flex",gap:10,alignItems:"center",background:"#eff6ff",borderBottom:"2px solid #bfdbfe"}}>
+              <div style={{width:28,height:28,borderRadius:"50%",background:"#dbeafe",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,flexShrink:0}}>📋</div>
+              <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:"#1e40af"}}>Gjendje Hapëse</div></div>
+              <div style={{fontWeight:800,color:"#1e40af"}}>{fmt2(openingBal)}</div>
             </div>}
-            {/* Transaction rows with running balance */}
             {getRowsWithBalance().map((r,i)=>{
-              const pos=Number(r.amount)>=0;
-              const balCol=r.runBal>=0?"#1e40af":"#dc2626";
-              return <div key={r.id} style={{padding:"10px 16px",display:"flex",gap:10,alignItems:"center",borderBottom:"1px solid #f1f5f9",background:i%2===0?"#fff":"#fafafa"}}>
-                <div style={{width:30,height:30,borderRadius:"50%",background:pos?"#dcfce7":"#fee2e2",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,flexShrink:0}}>{pos?"📥":"📤"}</div>
+              const pos=Number(r.amount)>=0; const balCol=r.runBal>=0?"#1e40af":"#dc2626";
+              const methodIcon=ACC_INFO(r.method||"cash").label.split(" ")[0];
+              return <div key={r.id||i} style={{padding:"9px 16px",display:"flex",gap:10,alignItems:"center",borderBottom:"1px solid #f1f5f9",background:i%2===0?"#fff":"#fafafa"}}>
+                <div style={{width:28,height:28,borderRadius:"50%",background:pos?"#dcfce7":"#fee2e2",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,flexShrink:0}}>{pos?"📥":"📤"}</div>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:13,fontWeight:600,color:"#0f172a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.description||r.type}</div>
-                  <div style={{fontSize:11,color:"#94a3b8"}}>{r.type} · {r.created_at?fmtFull(r.created_at.slice(0,10)):""}</div>
+                  <div style={{fontSize:10,color:"#94a3b8"}}>{methodIcon} {r.type} · {(r.created_at||"").slice(0,10)}</div>
                 </div>
                 <div style={{textAlign:"right",flexShrink:0}}>
                   <div style={{fontWeight:700,fontSize:13,color:pos?"#16a34a":"#dc2626"}}>{pos?"+":"-"}{isL?Math.abs(Number(r.amount)).toLocaleString("sq-AL")+" L":"€"+Math.abs(Number(r.amount)).toFixed(2)}</div>
-                  <div style={{fontSize:11,color:balCol,fontWeight:600}}>{isL?r.runBal.toLocaleString("sq-AL")+" L":"€"+r.runBal.toFixed(2)}</div>
+                  <div style={{fontSize:10,color:balCol,fontWeight:600}}>{fmt2(r.runBal)}</div>
                 </div>
               </div>;
             })}
-            {/* Closing balance row */}
-            <div style={{padding:"12px 16px",display:"flex",gap:12,alignItems:"center",background:closingBal>=0?"#f0fdf4":"#fff5f5",borderTop:"2px solid "+(closingBal>=0?"#bbf7d0":"#fecaca")}}>
-              <div style={{width:32,height:32,borderRadius:"50%",background:closingBal>=0?"#dcfce7":"#fee2e2",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>🏦</div>
-              <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:closingBal>=0?"#166534":"#991b1b"}}>Gjendje Mbyllëse{dateTo?" ("+dateTo+")":""}</div></div>
-              <div style={{fontWeight:800,fontSize:16,color:closingBal>=0?"#166534":"#991b1b"}}>{isL?closingBal.toLocaleString("sq-AL")+" L":"€"+closingBal.toFixed(2)}</div>
+            <div style={{padding:"10px 16px",display:"flex",gap:10,alignItems:"center",background:closingBal>=0?"#f0fdf4":"#fff5f5",borderTop:"2px solid "+(closingBal>=0?"#bbf7d0":"#fecaca")}}>
+              <div style={{width:28,height:28,borderRadius:"50%",background:closingBal>=0?"#dcfce7":"#fee2e2",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,flexShrink:0}}>🏦</div>
+              <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:closingBal>=0?"#166534":"#991b1b"}}>Gjendje Mbyllëse{dateTo?" ("+dateTo+")" :""}</div></div>
+              <div style={{fontWeight:800,fontSize:15,color:closingBal>=0?"#166534":"#991b1b"}}>{fmt2(closingBal)}</div>
             </div>
           </div>
         }
       </div>
 
-      {showA&&<Modal title={af.type==="in"?"📥 Hyrje Cash":"📤 Dalje Cash"} onClose={()=>setShowA(false)}>
+      {/* Modal Hyrje/Dalje */}
+      {showA&&<Modal title={af.type==="in"?"📥 Hyrje":"📤 Dalje"} onClose={()=>setShowA(false)}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <Fld label="Llogaria *" col2>
+            <div style={{display:"flex",gap:6}}>
+              {ACCOUNTS.map(acc=>(
+                <button key={acc.id} onClick={()=>setAf(f=>({...f,method:acc.id}))} style={{flex:1,padding:"8px 4px",borderRadius:8,border:"2px solid "+(af.method===acc.id?acc.color:"#e2e8f0"),background:af.method===acc.id?"#eff6ff":"#fff",fontSize:12,fontWeight:700,cursor:"pointer",color:af.method===acc.id?acc.color:"#64748b"}}>{acc.label}</button>
+              ))}
+            </div>
+          </Fld>
           <Fld label="Shuma *"><input type="number" value={af.amount} onChange={e=>setAf(f=>({...f,amount:e.target.value}))} style={FL}/></Fld>
           <Fld label="Monedha"><select value={af.currency} onChange={e=>setAf(f=>({...f,currency:e.target.value}))} style={FL}><option value="ALL">Lekë</option><option value="EUR">Euro</option></select></Fld>
           <Fld label="Përshkrimi" col2><input value={af.description} onChange={e=>setAf(f=>({...f,description:e.target.value}))} style={FL} placeholder="Arsyeja..."/></Fld>
@@ -1647,7 +1613,10 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
           <button onClick={doAdd} style={PB}>✅ Konfirmo</button>
         </div>
       </Modal>}
-      {showT&&<Modal title="🔄 Kalim Ndërmjet Arkave" onClose={()=>setShowT(false)}>
+
+      {/* Modal Kalim Monedhë */}
+      {showT&&<Modal title="🔄 Kalim Ndërmjet Monedhave (Cash)" onClose={()=>setShowT(false)}>
+        <div style={{background:"#fef3c7",border:"1px solid #fde68a",borderRadius:7,padding:"8px 12px",marginBottom:12,fontSize:12,color:"#92400e"}}>ℹ️ Kalimi bëhet brenda llogarisë Cash.</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           <Fld label="Drejtimi" col2><select value={tf.from} onChange={e=>setTf(f=>({...f,from:e.target.value}))} style={FL}><option value="ALL">Lekë → Euro</option><option value="EUR">Euro → Lekë</option></select></Fld>
           <Fld label={tf.from==="ALL"?"Shuma (L)":"Shuma (€)"}><input type="number" value={tf.amount} onChange={e=>setTf(f=>({...f,amount:e.target.value}))} style={FL}/></Fld>
@@ -1661,16 +1630,31 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
           <button onClick={doTransfer} style={{...PB,background:"#7c3aed"}}>🔄 Kryej</button>
         </div>
       </Modal>}
+
+      {/* Modal Shpenzim */}
       {showE&&<Modal title="➖ Shpenzim i Ri" onClose={()=>setShowE(false)}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <Fld label="Llogaria (del nga) *" col2>
+            <div style={{display:"flex",gap:6}}>
+              {ACCOUNTS.map(acc=>(
+                <button key={acc.id} onClick={()=>setEf(f=>({...f,method:acc.id}))} style={{flex:1,padding:"8px 4px",borderRadius:8,border:"2px solid "+(ef.method===acc.id?acc.color:"#e2e8f0"),background:ef.method===acc.id?"#eff6ff":"#fff",fontSize:12,fontWeight:700,cursor:"pointer",color:ef.method===acc.id?acc.color:"#64748b"}}>{acc.label}</button>
+              ))}
+            </div>
+          </Fld>
           <Fld label="Përshkrimi *" col2><input value={ef.description} onChange={e=>setEf(f=>({...f,description:e.target.value}))} style={FL} placeholder="p.sh. Ndërrimi gomave"/></Fld>
           <Fld label="Shuma *"><input type="number" value={ef.amount} onChange={e=>setEf(f=>({...f,amount:e.target.value}))} style={FL}/></Fld>
           <Fld label="Monedha"><select value={ef.currency} onChange={e=>setEf(f=>({...f,currency:e.target.value}))} style={FL}><option value="ALL">Lekë</option><option value="EUR">Euro</option></select></Fld>
-          <Fld label="Kategoria"><select value={ef.category} onChange={e=>setEf(f=>({...f,category:e.target.value}))} style={FL}>{CATS.map(c=><option key={c}>{c}</option>)}</select></Fld>
+          <Fld label="Kategoria" col2>
+            <select value={ef.category} onChange={e=>setEf(f=>({...f,category:e.target.value,catCustom:""}))} style={FL}>
+              {CATS.map(c=><option key={c}>{c}</option>)}
+              <option value="__custom__">+ Kategori e Re...</option>
+            </select>
+            {ef.category==="__custom__"&&<input value={ef.catCustom} onChange={e=>setEf(f=>({...f,catCustom:e.target.value}))} placeholder="Shkruaj kategorinë..." style={{...FL,marginTop:6}}/>}
+          </Fld>
           <Fld label="Makina"><CarPicker cars={cars} value={ef.car_name} onChange={car=>setEf(f=>({...f,car_name:car.name}))} placeholder="🔍 Kërko targën (ose lëre bosh)"/></Fld>
           <Fld label="Data"><DateInput value={ef.expense_date} onChange={v=>setEf(f=>({...f,expense_date:v}))}/></Fld>
         </div>
-        <div style={{background:"#fef3c7",border:"1px solid #fde68a",borderRadius:7,padding:"8px 12px",marginTop:8,fontSize:12,color:"#92400e"}}>⚠️ Shuma zbritet automatikisht nga arka.</div>
+        <div style={{background:"#fef3c7",border:"1px solid #fde68a",borderRadius:7,padding:"8px 12px",marginTop:8,fontSize:12,color:"#92400e"}}>⚠️ Shuma zbritet nga llogaria e zgjedhur.</div>
         <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
           <button onClick={()=>setShowE(false)} style={CB}>Anulo</button>
           <button onClick={doAddExp} style={{...PB,background:"#ea580c"}}>💾 Ruaj</button>
@@ -1957,7 +1941,7 @@ function RptPage({sess,reloadTick}) {
   const fSrvs=srvs.filter(s=>!carSet||carSet.has(s.car_name));
   const fCarSettings=carSettings.filter(cs=>!carSet||carSet.has(cs.car_name));
 
-  const REPORT_TABS=[["cars","🚗 Makina & Rezervime"],["finance","💰 Lëvizjet e Arkës"],["cli","👥 Klientët"],["docs","⏰ Skadimet"],["deposits","🔒 Depozitat"]];
+  const REPORT_TABS=[["cars","🚗 Makina & Rezervime"],["pl","📊 Pasqyra e të Ardhurave"],["finance","💰 Lëvizjet e Arkës"],["cli","👥 Klientët"],["docs","⏰ Skadimet"],["deposits","🔒 Depozitat"]];
 
   return (
     <div style={{padding:14,display:"flex",gap:16,alignItems:"flex-start"}}>
@@ -2042,12 +2026,202 @@ function RptPage({sess,reloadTick}) {
           ? <div style={{textAlign:"center",color:"#94a3b8",padding:60,background:"#fff",borderRadius:12,border:"1px dashed #cbd5e1"}}>Zgjidh filtrat anash dhe kliko <strong>"🔍 Shfaq Raportin"</strong> për ta parë.</div>
           : <>
               {tab==="cars"&&<CarsReport cars={cars} reses={fReses} exps={fExps} view={view}/>}
+              {tab==="pl"&&<PLReport reses={fReses} exps={fExps} ledger={fLedger} dFrom={dFrom} dTo={dTo}/>}
               {tab==="finance"&&<FinanceReport cars={cars} ledger={fLedger} reses={reses} view={view}/>}
               {tab==="cli"&&<ClientsReport clients={clients} reses={fReses} selClient={selClient} view={view}/>}
               {tab==="docs"&&<DocsReport cars={cars} services={fSrvs} carSettings={fCarSettings} reses={reses} selTypes={selDocTypes}/>}
               {tab==="deposits"&&<DepositsReport cars={cars} ledger={fLedger} reses={reses}/>}
             </>
         }
+      </div>
+    </div>
+  );
+}
+
+// ─── PASQYRA E TË ARDHURAVE DHE SHPENZIMEVE ──────────────────────────────────
+function PLReport({reses,exps,ledger,dFrom,dTo}){
+  // Të ardhura sipas metodës pagese (nga cash_ledger)
+  const payments=ledger.filter(l=>l.type==="payment"||l.type==="manual_in");
+  function sumLedger(method,cur){ return payments.filter(l=>(l.method||"cash")===method&&l.currency===cur).reduce((s,l)=>s+Number(l.amount),0); }
+
+  const incomeRows=[
+    {label:"Të Ardhura Cash",    icon:"💵", l:sumLedger("cash","ALL"),    e:sumLedger("cash","EUR")},
+    {label:"Të Ardhura POS",     icon:"💳", l:sumLedger("pos","ALL"),     e:sumLedger("pos","EUR")},
+    {label:"Të Ardhura Bankare", icon:"🏦", l:sumLedger("transfer","ALL"),e:sumLedger("transfer","EUR")},
+  ].filter(r=>r.l>0||r.e>0);
+
+  const totalIncL=incomeRows.reduce((s,r)=>s+r.l,0);
+  const totalIncE=incomeRows.reduce((s,r)=>s+r.e,0);
+
+  // Shpenzime sipas kategorisë
+  const cats=[...new Set(exps.map(e=>e.category||"Tjetër"))].sort();
+  const expByCat=cats.map(cat=>{
+    const rows=exps.filter(e=>(e.category||"Tjetër")===cat);
+    return {
+      cat,
+      l:rows.filter(e=>e.currency==="ALL").reduce((s,e)=>s+Number(e.amount),0),
+      e:rows.filter(e=>e.currency==="EUR").reduce((s,e)=>s+Number(e.amount),0),
+    };
+  }).filter(r=>r.l>0||r.e>0);
+
+  const totalExpL=expByCat.reduce((s,r)=>s+r.l,0);
+  const totalExpE=expByCat.reduce((s,r)=>s+r.e,0);
+
+  const profitL=totalIncL-totalExpL;
+  const profitE=totalIncE-totalExpE;
+
+  // Rezervime ne pritje (te pa-arketuara)
+  const pendingL=reses.filter(r=>r.payment_status!=="paguar"&&r.currency==="ALL").reduce((s,r)=>s+Number(r.total_price||0)-Number(r.amount_paid||0),0);
+  const pendingE=reses.filter(r=>r.payment_status!=="paguar"&&r.currency==="EUR").reduce((s,r)=>s+Number(r.total_price||0)-Number(r.amount_paid||0),0);
+
+  function fL(v){ return v.toLocaleString("sq-AL")+" L"; }
+  function fE(v){ return "€"+Math.abs(v).toFixed(2); }
+  function fmtBoth(l,e){ return [l>0?fL(l):"",e>0?fE(e):""].filter(Boolean).join(" / ")||"—"; }
+
+  function exportPDF(){
+    const period=(dFrom||dTo)?("Periudha: "+(dFrom||"fillimi")+" → "+(dTo||"sot")):"Të gjitha periudhat";
+    const incRows=incomeRows.map((r,i)=>`<tr style="background:${i%2===0?"#fff":"#f9fafb"}"><td style="padding:9px 12px;font-size:13px">${r.icon} ${r.label}</td><td style="padding:9px 12px;font-size:13px;text-align:right;color:#166534;font-weight:600">${r.l>0?fL(r.l):""}</td><td style="padding:9px 12px;font-size:13px;text-align:right;color:#166534;font-weight:600">${r.e>0?fE(r.e):""}</td></tr>`).join("");
+    const expRows=expByCat.map((r,i)=>`<tr style="background:${i%2===0?"#fff":"#f9fafb"}"><td style="padding:9px 12px;font-size:13px;padding-left:24px">• ${r.cat}</td><td style="padding:9px 12px;font-size:13px;text-align:right;color:#991b1b">${r.l>0?"("+fL(r.l)+")":""}</td><td style="padding:9px 12px;font-size:13px;text-align:right;color:#991b1b">${r.e>0?"("+fE(r.e)+")":""}</td></tr>`).join("");
+    const pColor=l=>l>=0?"#166534":"#991b1b";
+    const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Pasqyra e të Ardhurave</title><style>body{font-family:Arial,sans-serif;margin:0;padding:24px;color:#0f172a}table{width:100%;border-collapse:collapse}th{background:#1e293b;color:#fff;padding:10px 12px;text-align:left;font-size:11px}th:nth-child(2),th:nth-child(3){text-align:right}@media print{body{padding:10px}}</style></head><body>
+    <div style="background:#0f172a;color:#fff;padding:20px 24px;border-radius:10px;margin-bottom:16px"><h2 style="margin:0;font-size:18px">📊 Pasqyra e të Ardhurave dhe Shpenzimeve</h2><p style="margin:4px 0 0;opacity:.7;font-size:12px">${period} · Gjeneruar: ${nowStr()}</p></div>
+    <table><thead><tr><th>Zëri</th><th style="text-align:right;width:140px">LEKË</th><th style="text-align:right;width:120px">EURO</th></tr></thead><tbody>
+    <tr style="background:#f0fdf4"><td colspan="3" style="padding:8px 12px;font-size:11px;font-weight:800;color:#166534;letter-spacing:1px">TË ARDHURAT</td></tr>
+    ${incRows}
+    <tr style="background:#dcfce7;border-top:2px solid #16a34a"><td style="padding:10px 12px;font-weight:800;font-size:14px">TOTALI TË ARDHURAT</td><td style="padding:10px 12px;text-align:right;font-weight:800;font-size:14px;color:#166534">${fL(totalIncL)}</td><td style="padding:10px 12px;text-align:right;font-weight:800;font-size:14px;color:#166534">${fE(totalIncE)}</td></tr>
+    <tr><td colspan="3" style="padding:4px"></td></tr>
+    <tr style="background:#fef2f2"><td colspan="3" style="padding:8px 12px;font-size:11px;font-weight:800;color:#991b1b;letter-spacing:1px">SHPENZIMET</td></tr>
+    ${expRows}
+    <tr style="background:#fee2e2;border-top:2px solid #dc2626"><td style="padding:10px 12px;font-weight:800;font-size:14px">TOTALI SHPENZIMET</td><td style="padding:10px 12px;text-align:right;font-weight:800;font-size:14px;color:#991b1b">(${fL(totalExpL)})</td><td style="padding:10px 12px;text-align:right;font-weight:800;font-size:14px;color:#991b1b">(${fE(totalExpE)})</td></tr>
+    <tr><td colspan="3" style="padding:4px"></td></tr>
+    <tr style="background:${profitL>=0?"#f0fdf4":"#fef2f2"};border-top:3px solid ${profitL>=0?"#16a34a":"#dc2626"}"><td style="padding:12px;font-weight:900;font-size:16px">FITIMI / HUMBJA NETO</td><td style="padding:12px;text-align:right;font-weight:900;font-size:16px;color:${pColor(profitL)}">${profitL>=0?"":"-"}${fL(Math.abs(profitL))}</td><td style="padding:12px;text-align:right;font-weight:900;font-size:16px;color:${pColor(profitE)}">${profitE>=0?"":"-"}${fE(Math.abs(profitE))}</td></tr>
+    </tbody></table></body></html>`;
+    const w=window.open("","_blank"); if(w){w.document.write(html);w.document.close();setTimeout(()=>w.print(),500);}
+  }
+
+  function exportExcel(){
+    const rows=[
+      {Zëri:"TË ARDHURAT","LEKË":"","EURO":""},
+      ...incomeRows.map(r=>({Zëri:r.icon+" "+r.label,"LEKË":r.l||0,"EURO":r.e||0})),
+      {Zëri:"TOTALI TË ARDHURAT","LEKË":totalIncL,"EURO":totalIncE},
+      {Zëri:"","LEKË":"","EURO":""},
+      {Zëri:"SHPENZIMET","LEKË":"","EURO":""},
+      ...expByCat.map(r=>({Zëri:"  "+r.cat,"LEKË":r.l?-r.l:0,"EURO":r.e?-r.e:0})),
+      {Zëri:"TOTALI SHPENZIMET","LEKË":-totalExpL,"EURO":-totalExpE},
+      {Zëri:"","LEKË":"","EURO":""},
+      {Zëri:"FITIMI / HUMBJA NETO","LEKË":profitL,"EURO":profitE},
+    ];
+    exportToExcel(rows,"Pasqyra_Ardhurave.xlsx","P&L");
+  }
+
+  const SectionHeader=({label,color,bg})=>(
+    <div style={{background:bg,borderRadius:8,padding:"8px 14px",marginBottom:8}}>
+      <span style={{fontSize:11,fontWeight:800,color,letterSpacing:1}}>{label}</span>
+    </div>
+  );
+
+  const Row=({label,l,e,bold,color,indent})=>(
+    <div style={{display:"flex",alignItems:"center",padding:"8px 14px",borderBottom:"1px solid #f1f5f9",background:"#fff"}}>
+      <div style={{flex:1,fontSize:13,fontWeight:bold?700:400,color:color||"#374151",paddingLeft:indent?12:0}}>{label}</div>
+      <div style={{width:150,textAlign:"right",fontSize:13,fontWeight:bold?700:400,color:color||(l>=0?"#166534":"#991b1b")}}>{l!==0?fL(Math.abs(l)):""}</div>
+      <div style={{width:120,textAlign:"right",fontSize:13,fontWeight:bold?700:400,color:color||(e>=0?"#166534":"#991b1b")}}>{e!==0?fE(Math.abs(e)):""}</div>
+    </div>
+  );
+
+  return(
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
+        <div>
+          <div style={{fontSize:15,fontWeight:700,color:"#0f172a"}}>📊 Pasqyra e të Ardhurave dhe Shpenzimeve</div>
+          {(dFrom||dTo)&&<div style={{fontSize:12,color:"#64748b",marginTop:2}}>{dFrom||"—"} → {dTo||"sot"}</div>}
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={exportExcel} style={{...PB,background:"#059669",fontSize:12,padding:"7px 14px"}}>📥 Excel</button>
+          <button onClick={exportPDF} style={{...PB,background:"#dc2626",fontSize:12,padding:"7px 14px"}}>🖨️ PDF</button>
+        </div>
+      </div>
+
+      {/* Karta permbledhese */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:10,marginBottom:20}}>
+        {[
+          {label:"Të Ardhura (L)",val:fL(totalIncL),color:"#166534",bg:"#f0fdf4",border:"#bbf7d0"},
+          {label:"Të Ardhura (€)",val:fE(totalIncE),color:"#166534",bg:"#f0fdf4",border:"#bbf7d0"},
+          {label:"Shpenzime (L)",val:fL(totalExpL),color:"#991b1b",bg:"#fef2f2",border:"#fecaca"},
+          {label:"Shpenzime (€)",val:fE(totalExpE),color:"#991b1b",bg:"#fef2f2",border:"#fecaca"},
+          {label:"Fitim Neto (L)",val:(profitL>=0?"":"-")+fL(Math.abs(profitL)),color:profitL>=0?"#1d4ed8":"#dc2626",bg:profitL>=0?"#eff6ff":"#fef2f2",border:profitL>=0?"#bfdbfe":"#fecaca"},
+          {label:"Fitim Neto (€)",val:(profitE>=0?"":"-")+fE(Math.abs(profitE)),color:profitE>=0?"#1d4ed8":"#dc2626",bg:profitE>=0?"#eff6ff":"#fef2f2",border:profitE>=0?"#bfdbfe":"#fecaca"},
+        ].map(c=>(
+          <div key={c.label} style={{background:c.bg,border:"1px solid "+c.border,borderRadius:10,padding:"12px 14px"}}>
+            <div style={{fontSize:10,color:"#64748b",fontWeight:700,marginBottom:4}}>{c.label}</div>
+            <div style={{fontSize:15,fontWeight:800,color:c.color}}>{c.val}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Pasqyra e plote */}
+      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,overflow:"hidden"}}>
+        {/* Header kolonave */}
+        <div style={{display:"flex",background:"#1e293b",padding:"10px 14px"}}>
+          <div style={{flex:1,fontSize:11,fontWeight:700,color:"#94a3b8",letterSpacing:1}}>ZËI</div>
+          <div style={{width:150,textAlign:"right",fontSize:11,fontWeight:700,color:"#94a3b8",letterSpacing:1}}>LEKË</div>
+          <div style={{width:120,textAlign:"right",fontSize:11,fontWeight:700,color:"#94a3b8",letterSpacing:1}}>EURO</div>
+        </div>
+
+        {/* Të Ardhurat */}
+        <SectionHeader label="TË ARDHURAT" color="#166534" bg="#f0fdf4"/>
+        {incomeRows.length===0
+          ?<div style={{padding:"10px 14px",fontSize:13,color:"#94a3b8"}}>Asnjë arkëtim i regjistruar.</div>
+          :incomeRows.map(r=><Row key={r.label} label={r.icon+" "+r.label} l={r.l} e={r.e} indent/>)
+        }
+        <div style={{background:"#dcfce7",borderTop:"2px solid #16a34a",display:"flex",padding:"10px 14px"}}>
+          <div style={{flex:1,fontSize:14,fontWeight:800,color:"#166534"}}>TOTALI TË ARDHURAT</div>
+          <div style={{width:150,textAlign:"right",fontSize:14,fontWeight:800,color:"#166534"}}>{fL(totalIncL)}</div>
+          <div style={{width:120,textAlign:"right",fontSize:14,fontWeight:800,color:"#166534"}}>{fE(totalIncE)}</div>
+        </div>
+
+        <div style={{height:10,background:"#f8fafc"}}/>
+
+        {/* Shpenzimet */}
+        <SectionHeader label="SHPENZIMET SIPAS KATEGORISË" color="#991b1b" bg="#fef2f2"/>
+        {expByCat.length===0
+          ?<div style={{padding:"10px 14px",fontSize:13,color:"#94a3b8"}}>Asnjë shpenzim i regjistruar.</div>
+          :expByCat.map(r=>(
+            <div key={r.cat} style={{display:"flex",alignItems:"center",padding:"8px 14px",borderBottom:"1px solid #f1f5f9",background:"#fff"}}>
+              <div style={{flex:1,fontSize:13,color:"#374151",paddingLeft:12}}>• {r.cat}</div>
+              <div style={{width:150,textAlign:"right",fontSize:13,color:"#991b1b"}}>({r.l>0?fL(r.l):"—"})</div>
+              <div style={{width:120,textAlign:"right",fontSize:13,color:"#991b1b"}}>({r.e>0?fE(r.e):"—"})</div>
+            </div>
+          ))
+        }
+        <div style={{background:"#fee2e2",borderTop:"2px solid #dc2626",display:"flex",padding:"10px 14px"}}>
+          <div style={{flex:1,fontSize:14,fontWeight:800,color:"#991b1b"}}>TOTALI SHPENZIMET</div>
+          <div style={{width:150,textAlign:"right",fontSize:14,fontWeight:800,color:"#991b1b"}}>({fL(totalExpL)})</div>
+          <div style={{width:120,textAlign:"right",fontSize:14,fontWeight:800,color:"#991b1b"}}>({fE(totalExpE)})</div>
+        </div>
+
+        <div style={{height:10,background:"#f8fafc"}}/>
+
+        {/* Fitimi Neto */}
+        <div style={{background:profitL>=0?"#eff6ff":"#fef2f2",borderTop:"3px solid "+(profitL>=0?"#1d4ed8":"#dc2626"),display:"flex",padding:"14px"}}>
+          <div style={{flex:1,fontSize:16,fontWeight:900,color:profitL>=0?"#1e40af":"#991b1b"}}>
+            {profitL>=0?"✅":"⚠️"} FITIMI / HUMBJA NETO
+          </div>
+          <div style={{width:150,textAlign:"right",fontSize:16,fontWeight:900,color:profitL>=0?"#1e40af":"#991b1b"}}>
+            {profitL>=0?"":"-"}{fL(Math.abs(profitL))}
+          </div>
+          <div style={{width:120,textAlign:"right",fontSize:16,fontWeight:900,color:profitE>=0?"#1e40af":"#991b1b"}}>
+            {profitE>=0?"":"-"}{fE(Math.abs(profitE))}
+          </div>
+        </div>
+
+        {/* Fatura ne pritje */}
+        {(pendingL>0||pendingE>0)&&(
+          <div style={{background:"#fefce8",borderTop:"1px solid #fde047",display:"flex",padding:"10px 14px",alignItems:"center"}}>
+            <div style={{flex:1,fontSize:12,color:"#713f12",fontWeight:600}}>⏳ Fatura ende pa arkëtuar (jo të përfshira sipër)</div>
+            <div style={{width:150,textAlign:"right",fontSize:12,fontWeight:700,color:"#92400e"}}>{pendingL>0?fL(pendingL):""}</div>
+            <div style={{width:120,textAlign:"right",fontSize:12,fontWeight:700,color:"#92400e"}}>{pendingE>0?fE(pendingE):""}</div>
+          </div>
+        )}
       </div>
     </div>
   );
