@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import * as XLSX from "xlsx";
 
 // ─── SUPABASE CONFIG ──────────────────────────────────────────────────────────
 const SB_URL = "https://ngpauvkegeuztpajndhu.supabase.co";
@@ -43,13 +44,17 @@ async function sbRefreshToken(refreshToken) {
 }
 async function sbUploadPhoto(file, carName, token) {
   const ext = file.name.split(".").pop();
-  const path = carName.replace(/\s+/g, "_") + "." + ext;
-  const r = await fetch(SB_URL + "/storage/v1/object/car-photos/" + path, {
+  const safeName = (carName||"makine").replace(/[^a-zA-Z0-9]+/g,"_").replace(/^_+|_+$/g,"") || "makine";
+  const path = safeName + "." + ext;
+  const r = await fetch(SB_URL + "/storage/v1/object/car-photos/" + encodeURIComponent(path), {
     method: "POST", headers: { "apikey": SB_KEY, "Authorization": "Bearer " + token, "Content-Type": file.type, "x-upsert": "true" },
     body: file
   });
-  if (!r.ok) throw new Error("Upload failed");
-  return STORAGE_URL + path;
+  if (!r.ok) {
+    const errText = await r.text().catch(()=>"");
+    throw new Error("Upload dështoi: " + (errText || r.status));
+  }
+  return STORAGE_URL + encodeURIComponent(path);
 }
 
 // Authenticated fetch (uses session token)
@@ -87,6 +92,13 @@ async function sbAuthDelete(table, id, token) {
   const r = await fetch(SB_URL + "/rest/v1/" + table + "?id=eq." + id, { method: "DELETE", headers: h });
   if (!r.ok) { const e = await r.json(); throw new Error(e.message || r.status); }
 }
+async function sbAuthPatchWhere(table, filterQS, body, token) {
+  const h = { ...HDRS, "Authorization": "Bearer " + token, "Prefer": "return=representation" };
+  const r = await fetch(SB_URL + "/rest/v1/" + table + "?" + filterQS, { method: "PATCH", headers: h, body: JSON.stringify(body) });
+  if (!r.ok) { const e = await r.json().catch(()=>({message:r.status})); throw new Error(e.message || r.status); }
+  const text = await r.text();
+  return text ? JSON.parse(text) : [];
+}
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const CAR_PALETTE = [
@@ -106,16 +118,18 @@ const CATS = ["Mirëmbajtje","Karburant","Sigurim","Taksa","Paga","Reklamë","Zy
 const DAYS_SQ = ["Di","Hë","Ma","Më","En","Pë","Sh"];
 
 function carColor(car, cars) { const i = cars.findIndex(c=>(c.name||c)===car); return CAR_PALETTE[Math.max(i,0) % CAR_PALETTE.length]; }
+function carLabel(name, cars) { const c=cars?.find(x=>x.name===name); return (c&&c.targa) ? c.targa : (name||"-"); }
 function gid() { return Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
 function toYMD(d) { return d.toISOString().slice(0,10); }
 function addD(s,n) { const d=new Date(s); d.setDate(d.getDate()+n); return toYMD(d); }
 function fmtD(s) { if(!s) return ""; const d=new Date(s); return String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0"); }
 function fmtFull(s) { if(!s) return ""; const d=new Date(s); return String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+d.getFullYear(); }
+function fmtDT(s) { if(!s) return ""; const d=new Date(s); return String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+d.getFullYear()+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }
 function fmtM(a,c) { return c==="EUR"?"€"+Number(a).toFixed(2):Number(a).toLocaleString("sq-AL")+" L"; }
 function dow(s) { return DAYS_SQ[new Date(s).getDay()]; }
 function isWE(s) { const d=new Date(s).getDay(); return d===0||d===6; }
 function diffDays(a,b) { if(!a||!b) return 0; return Math.max(1,Math.ceil((new Date(b)-new Date(a))/86400000)); }
-function nowStr() { return new Date().toLocaleString("sq-AL"); }
+function nowStr() { return fmtDT(new Date().toISOString()); }
 function todayY() { return toYMD(new Date()); }
 
 const PB  = {padding:"8px 16px",borderRadius:8,background:"#1d4ed8",color:"#fff",border:"none",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"};
@@ -125,6 +139,70 @@ const FL  = {width:"100%",padding:"9px 11px",borderRadius:8,border:"1px solid #e
 const NB  = {padding:"7px 14px",borderRadius:8,background:"#f1f5f9",border:"1px solid #e2e8f0",cursor:"pointer",fontSize:13,fontFamily:"inherit",fontWeight:600};
 
 function Badge({s}) { const c=SC[s]||{bg:"#f3f4f6",tx:"#374151"}; return <span style={{padding:"3px 9px",borderRadius:20,fontSize:11,fontWeight:700,background:c.bg,color:c.tx}}>{s}</span>; }
+function DateInput({value,onChange,style}){
+  const [dd,setDd]=useState("");
+  const [mm,setMm]=useState("");
+  const [yy,setYy]=useState("");
+  const ddRef=useRef(null), mmRef=useRef(null), yyRef=useRef(null);
+
+  useEffect(()=>{
+    if(value){
+      const [y,m,d]=value.split("-");
+      setDd(d||""); setMm(m||""); setYy(y||"");
+    } else {
+      setDd(""); setMm(""); setYy("");
+    }
+  },[value]);
+
+  function tryCommit(d,m,y){
+    if(d.length===2&&m.length===2&&y.length===4){
+      const iso=y+"-"+m+"-"+d;
+      const dt=new Date(iso+"T00:00:00");
+      if(!isNaN(dt.getTime())&&dt.getDate()===Number(d)&&(dt.getMonth()+1)===Number(m)){
+        onChange(iso); return;
+      }
+    }
+    if(d===""&&m===""&&y==="") onChange("");
+  }
+  function onDd(e){
+    const v=e.target.value.replace(/\D/g,"").slice(0,2);
+    setDd(v); tryCommit(v,mm,yy);
+    if(v.length===2) mmRef.current?.focus();
+  }
+  function onMm(e){
+    const v=e.target.value.replace(/\D/g,"").slice(0,2);
+    setMm(v); tryCommit(dd,v,yy);
+    if(v.length===2) yyRef.current?.focus();
+  }
+  function onYy(e){
+    const v=e.target.value.replace(/\D/g,"").slice(0,4);
+    setYy(v); tryCommit(dd,mm,v);
+  }
+  function onMmKey(e){ if(e.key==="Backspace"&&mm==="") ddRef.current?.focus(); }
+  function onYyKey(e){ if(e.key==="Backspace"&&yy==="") mmRef.current?.focus(); }
+  function onNativeDate(e){
+    const v=e.target.value;
+    if(v){ const [y,m,d]=v.split("-"); setDd(d); setMm(m); setYy(y); onChange(v); }
+  }
+
+  const segStyle={textAlign:"center",border:"none",outline:"none",background:"transparent",fontFamily:"inherit",fontSize:13,padding:0,color:"#0f172a"};
+
+  return (
+    <div style={{position:"relative",width:"100%"}}>
+      <div style={{...(style||FL),display:"flex",alignItems:"center",gap:2,paddingRight:26,width:"100%",boxSizing:"border-box"}}>
+        <input ref={ddRef} value={dd} onChange={onDd} placeholder="dd" maxLength={2} style={{...segStyle,width:18}}/>
+        <span style={{color:"#94a3b8"}}>/</span>
+        <input ref={mmRef} value={mm} onChange={onMm} onKeyDown={onMmKey} placeholder="mm" maxLength={2} style={{...segStyle,width:18}}/>
+        <span style={{color:"#94a3b8"}}>/</span>
+        <input ref={yyRef} value={yy} onChange={onYy} onKeyDown={onYyKey} placeholder="yyyy" maxLength={4} style={{...segStyle,width:34}}/>
+      </div>
+      <input type="date" value={value||""} onChange={onNativeDate} tabIndex={-1}
+        style={{position:"absolute",right:3,top:3,bottom:3,width:22,opacity:0,cursor:"pointer",border:"none",padding:0}}/>
+      <span style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",fontSize:13,pointerEvents:"none"}}>📅</span>
+    </div>
+  );
+}
+
 function Fld({label,col2,children}) { return <div style={{gridColumn:col2?"span 2":"span 1"}}><label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>{label}</label>{children}</div>; }
 function Modal({title,onClose,children,wide}) {
   return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
@@ -143,7 +221,8 @@ function Err({msg, onRetry}) { return <div style={{padding:24,background:"#fef2f
 // ─── APP ROOT ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [sess, setSess] = useState(null);
-  const [page, setPage] = useState("cal");
+  const [page, setPage] = useState(()=>localStorage.getItem("crm_last_page")||"cal");
+  useEffect(()=>{ localStorage.setItem("crm_last_page",page); },[page]);
   const [lf, setLf]     = useState({email:"", password:"", err:"", loading:false});
   const [reloadTick, setReloadTick] = useState(0);
   const reload = useCallback(() => setReloadTick(t=>t+1), []);
@@ -319,7 +398,9 @@ export default function App() {
       <div style={{flex:1,overflow:"auto"}}>
         {curPage==="cal" && <CalPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
         {curPage==="res" && <ResPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
-        {curPage==="fin" && <FinPage  sess={sess} reloadTick={reloadTick}/>}
+        {curPage==="fin" && <FinPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
+        {curPage==="rpt" && <RptPage  sess={sess} reloadTick={reloadTick}/>}
+        {curPage==="srv" && <SrvPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
         {curPage==="ark" && <ArkPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
         {curPage==="cli" && <CliPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
         {curPage==="aud" && <AudPage  sess={sess} reloadTick={reloadTick}/>}
@@ -331,6 +412,7 @@ export default function App() {
 
 // ─── LOGIN ────────────────────────────────────────────────────────────────────
 function LoginScreen({lf,setLf,login}) {
+  const [showPass,setShowPass]=useState(false);
   const brand = JSON.parse(localStorage.getItem("crm_brand")||"{}");
   const logoUrl = brand.logoUrl || "";
   const appName = brand.appName || "Car Rental Manager";
@@ -375,9 +457,14 @@ function LoginScreen({lf,setLf,login}) {
         </div>
         <div style={{marginBottom:10}}>
           <label style={{color:"#8a7a45",fontSize:10,fontWeight:700,letterSpacing:2,display:"block",marginBottom:7,textTransform:"uppercase"}}>Fjalëkalimi</label>
-          <input type="password" value={lf.password} onChange={e=>setLf(f=>({...f,password:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&login()}
-            placeholder="••••••••"
-            style={{width:"100%",padding:"13px 14px",borderRadius:10,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(201,168,76,0.22)",color:"#dcc88a",fontSize:14,outline:"none",boxSizing:"border-box",fontFamily:"inherit"}}/>
+          <div style={{position:"relative"}}>
+            <input type={showPass?"text":"password"} value={lf.password} onChange={e=>setLf(f=>({...f,password:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&login()}
+              placeholder="••••••••"
+              style={{width:"100%",padding:"13px 40px 13px 14px",borderRadius:10,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(201,168,76,0.22)",color:"#dcc88a",fontSize:14,outline:"none",boxSizing:"border-box",fontFamily:"inherit"}}/>
+            <button type="button" onClick={()=>setShowPass(s=>!s)} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#8a7a45",fontSize:16,padding:4}}>
+              {showPass?"🙈":"👁️"}
+            </button>
+          </div>
         </div>
 
         {lf.err&&<div style={{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.25)",color:"#fca5a5",borderRadius:8,padding:"9px 12px",fontSize:12,marginTop:8}}>⚠️ {lf.err}</div>}
@@ -400,191 +487,161 @@ function LoginScreen({lf,setLf,login}) {
 // ─── CALENDAR ────────────────────────────────────────────────────────────────
 function CalPage({sess,reload,reloadTick,addLog}) {
   const [start,setStart]=useState(todayY());
-  const [ndays,setNdays]=useState(14);
+  const [ndays,setNdays]=useState(30);
   const [det,setDet]=useState(null);
   const [cars,setCars]=useState([]);
   const [reses,setReses]=useState([]);
   const [loading,setLoading]=useState(true);
+  const [customFrom,setCustomFrom]=useState("");
+  const [customTo,setCustomTo]=useState("");
   const td=todayY();
   const dates=Array.from({length:ndays},(_,i)=>addD(start,i));
+  const ROW_H=32, CAR_W=76, DATA_W=44;
 
   useEffect(()=>{
     setLoading(true);
     Promise.all([
       sbAuthGet("cars","order=sort_order.asc",sess.token),
       sbAuthGet("reservations","status=neq.Anuluar",sess.token)
-    ]).then(([c,r])=>{setCars(c);setReses(r);setLoading(false);}).catch(()=>setLoading(false));
+    ]).then(([c,r])=>{setCars(c.filter(x=>x.active!==false));setReses(r);setLoading(false);}).catch(()=>setLoading(false));
   },[reloadTick,sess.token]);
 
-  function resStart(carName,dt) { return reses.find(r=>r.car_name===carName&&r.date_from===dt); }
+  function sameCar(r,car) { return car.id&&r.car_id ? r.car_id===car.id : r.car_name===car.name; }
+  function resStart(car,dt) { return reses.find(r=>sameCar(r,car)&&r.date_from===dt); }
+  // Per diten e pare te dukshme te tabeles, kap edhe rezervimet qe kane filluar PARA fillimit te dritares, por vazhdojne brenda saj
+  function findRenderStart(car,dt,di) {
+    const exact = resStart(car,dt);
+    if(exact) return exact;
+    if(di===0) return reses.find(r=>sameCar(r,car)&&r.date_from<dt&&dt<=r.date_to);
+    return null;
+  }
   function rowSpan(r,ri) { let s=0; for(let i=ri;i<dates.length;i++){if(dates[i]>=r.date_from&&dates[i]<=r.date_to)s++;else if(dates[i]>r.date_to)break;} return s||1; }
-  function covered(carName,dt) { return reses.some(r=>r.car_name===carName&&dt>r.date_from&&dt<=r.date_to); }
+  function covered(car,dt) { return reses.some(r=>sameCar(r,car)&&dt>r.date_from&&dt<=r.date_to); }
   const MONTH_SQ=["Jan","Shk","Mar","Pri","Maj","Qer","Kor","Gus","Sht","Tet","Nën","Dhj"];
+
+  function applyCustomRange(){
+    if(!customFrom||!customTo) return;
+    const nd=diffDays(customFrom,customTo)+1;
+    setStart(customFrom); setNdays(Math.max(1,nd));
+  }
 
   if(loading) return <Spin/>;
 
   return (
     <div style={{padding:14,background:"#f8fafc",minHeight:"100%"}}>
-      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,flexWrap:"wrap"}}>
-        <div><h2 style={{margin:0,fontSize:18,fontWeight:800,color:"#0f172a"}}>📅 Disponueshmëria</h2><p style={{margin:"2px 0 0",fontSize:12,color:"#94a3b8"}}>Kliko rezervim për detaje</p></div>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+        <div><h2 style={{margin:0,fontSize:18,fontWeight:800,color:"#0f172a"}}>📅 Disponueshmëria</h2><p style={{margin:"2px 0 0",fontSize:12,color:"#94a3b8"}}>Kliko rezervim për detaje · {cars.length} makina</p></div>
         <div style={{flex:1}}/>
         <div style={{display:"flex",gap:6,alignItems:"center",background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"4px 6px"}}>
-          <button onClick={()=>setStart(addD(start,-ndays))} style={{border:"none",background:"#f1f5f9",borderRadius:7,width:30,height:30,cursor:"pointer",fontSize:14,fontWeight:700}}>‹</button>
-          <button onClick={()=>setStart(todayY())} style={{border:"none",background:"#1d4ed8",borderRadius:7,padding:"0 12px",height:30,cursor:"pointer",fontSize:12,fontWeight:700,color:"#fff"}}>Sot</button>
-          <button onClick={()=>setStart(addD(start,ndays))} style={{border:"none",background:"#f1f5f9",borderRadius:7,width:30,height:30,cursor:"pointer",fontSize:14,fontWeight:700}}>›</button>
+          <button onClick={()=>setStart(addD(start,-ndays))} style={{border:"none",background:"#f1f5f9",borderRadius:7,width:28,height:28,cursor:"pointer",fontSize:14,fontWeight:700}}>‹</button>
+          <button onClick={()=>{setStart(todayY());setNdays(30);}} style={{border:"none",background:"#1d4ed8",borderRadius:7,padding:"0 12px",height:28,cursor:"pointer",fontSize:12,fontWeight:700,color:"#fff"}}>Sot</button>
+          <button onClick={()=>setStart(addD(start,ndays))} style={{border:"none",background:"#f1f5f9",borderRadius:7,width:28,height:28,cursor:"pointer",fontSize:14,fontWeight:700}}>›</button>
         </div>
-        <select value={ndays} onChange={e=>setNdays(Number(e.target.value))} style={{padding:"7px 12px",borderRadius:8,border:"1px solid #e2e8f0",fontSize:13,fontFamily:"inherit",background:"#fff"}}>
-          {[7,14,21,30].map(n=><option key={n} value={n}>{n} ditë</option>)}
-        </select>
+        <div style={{display:"flex",gap:5,alignItems:"center",background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"5px 8px"}}>
+          <span style={{fontSize:11,color:"#64748b",fontWeight:600}}>Nga</span>
+          <DateInput value={customFrom} onChange={setCustomFrom} style={{border:"1px solid #e2e8f0",borderRadius:6,padding:"4px 6px",fontSize:12,fontFamily:"inherit",width:100}}/>
+          <span style={{fontSize:11,color:"#64748b",fontWeight:600}}>Deri</span>
+          <DateInput value={customTo} onChange={setCustomTo} style={{border:"1px solid #e2e8f0",borderRadius:6,padding:"4px 6px",fontSize:12,fontFamily:"inherit",width:100}}/>
+          <button onClick={applyCustomRange} style={{border:"none",background:"#059669",borderRadius:6,padding:"5px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:"#fff"}}>✓ Shiko</button>
+        </div>
       </div>
 
-      <div style={{overflowX:"auto",borderRadius:14,boxShadow:"0 4px 24px rgba(15,23,42,0.10)",border:"1px solid #d1d5db",WebkitOverflowScrolling:"touch",background:"#fff"}}>
-        <table style={{borderCollapse:"collapse",tableLayout:"fixed",minWidth:64+cars.length*115}}>
+      <div style={{overflowX:"auto",overflowY:"auto",maxHeight:"75vh",borderRadius:14,boxShadow:"0 4px 24px rgba(15,23,42,0.10)",border:"1px solid #d1d5db",WebkitOverflowScrolling:"touch",background:"#fff"}}>
+        <table style={{borderCollapse:"collapse",tableLayout:"fixed",minWidth:CAR_W+dates.length*DATA_W}}>
           <thead>
             <tr>
               {/* Corner */}
-              <th style={{width:58,minWidth:58,background:"#111827",padding:"12px 4px",fontSize:9,fontWeight:700,textAlign:"center",color:"#9ca3af",letterSpacing:1,position:"sticky",left:0,top:0,zIndex:6,borderRight:"2px solid #374151",borderBottom:"2px solid #374151"}}>
-                DATA
+              <th style={{width:CAR_W,minWidth:CAR_W,background:"#111827",padding:"6px 4px",fontSize:9,fontWeight:700,textAlign:"center",color:"#9ca3af",letterSpacing:0.5,position:"sticky",left:0,top:0,zIndex:6,borderRight:"2px solid #374151",borderBottom:"2px solid #374151"}}>
+                MAKINA
               </th>
-              {cars.map(car=>{
-                const cc=carColor(car.name,cars.map(c=>c.name));
+              {dates.map(dt=>{
+                const isT=dt===td, isW=isWE(dt);
+                const d=new Date(dt);
+                const isFirstOfMonth=d.getDate()===1;
                 return (
-                  <th key={car.id} style={{width:115,minWidth:115,background:cc.bg,padding:"8px 6px",textAlign:"center",borderLeft:"1px solid #e5e7eb",borderBottom:"3px solid "+cc.ac,borderRight:"1px solid #e5e7eb"}}>
-                    {car.photo_url
-                      ? <img src={car.photo_url} alt={car.name} style={{width:38,height:26,objectFit:"cover",borderRadius:5,display:"block",margin:"0 auto 3px",boxShadow:"0 1px 4px rgba(0,0,0,0.15)"}}/>
-                      : <div style={{fontSize:18,marginBottom:2}}>🚗</div>
-                    }
-                    <div style={{fontSize:9,fontWeight:800,color:cc.tx,lineHeight:1.3,letterSpacing:"0.3px"}}>{car.name}</div>
+                  <th key={dt} style={{
+                    width:DATA_W,minWidth:DATA_W,padding:"4px 2px",textAlign:"center",
+                    background:isT?"#1d4ed8":isW?"#374151":"#1f2937",
+                    borderLeft:isFirstOfMonth?"2px solid #6b7280":"1px solid #374151",
+                    borderBottom:"2px solid #374151",
+                    position:"sticky",top:0,zIndex:5
+                  }}>
+                    <div style={{fontSize:9,fontWeight:800,color:isT?"#fff":isW?"#d1d5db":"#f3f4f6",lineHeight:1}}>{fmtD(dt)}</div>
                   </th>
                 );
               })}
             </tr>
           </thead>
           <tbody>
-            {dates.map((dt,di)=>{
-              const isT=dt===td, isW=isWE(dt);
-              const d=new Date(dt);
-              const isFirstOfMonth=d.getDate()===1;
-              const monthBorder=isFirstOfMonth?"2px solid #9ca3af":"1px solid #e5e7eb";
+            {cars.map(car=>{
+              const cc=carColor(car.name,cars.map(c=>c.name));
               return (
-                <tr key={dt} style={{borderBottom:monthBorder}}>
-                  {/* DATE cell — sticky left, dark */}
-                  <td style={{
-                    padding:"0 4px",height:48,textAlign:"center",
-                    background:isT?"#1d4ed8":isW?"#374151":"#1f2937",
-                    borderRight:"2px solid #374151",
-                    borderBottom:isFirstOfMonth?"2px solid #6b7280":"1px solid #374151",
+                <tr key={car.id}>
+                  {/* CAR cell — sticky left, foto si sfond */}
+                  <td title={car.model||""} style={{
+                    width:CAR_W,minWidth:CAR_W,height:ROW_H,padding:0,textAlign:"center",
+                    overflow:"hidden",
+                    background:car.photo_url?("linear-gradient(rgba(0,0,0,0.45),rgba(0,0,0,0.45)), url('"+car.photo_url+"') center/cover no-repeat"):cc.bg,
+                    borderRight:"2px solid "+cc.ac,borderBottom:"1px solid #e5e7eb",
                     position:"sticky",left:0,zIndex:2
                   }}>
-                    <div style={{fontSize:9,color:isT?"#bfdbfe":isW?"#9ca3af":"#6b7280",fontWeight:600}}>{dow(dt)}</div>
-                    <div style={{fontSize:13,fontWeight:800,color:isT?"#fff":isW?"#d1d5db":"#f3f4f6",lineHeight:1.1}}>{fmtD(dt)}</div>
-                    {isFirstOfMonth&&<div style={{fontSize:8,color:isT?"#93c5fd":"#9ca3af",fontWeight:700,marginTop:1,letterSpacing:0.5}}>{MONTH_SQ[d.getMonth()]}</div>}
+                    <div style={{fontSize:10,fontWeight:900,color:car.photo_url?"#fff":cc.tx,lineHeight:1.1,letterSpacing:"0.2px",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textShadow:car.photo_url?"0 1px 3px rgba(0,0,0,0.7)":"none",padding:"0 3px"}}>{car.targa||car.name}</div>
+                    {car.model&&<div style={{fontSize:7,fontWeight:600,color:car.photo_url?"rgba(255,255,255,0.85)":cc.tx+"aa",lineHeight:1.1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textShadow:car.photo_url?"0 1px 2px rgba(0,0,0,0.7)":"none",padding:"0 3px"}}>{car.model}</div>}
                   </td>
 
-                  {cars.map(car=>{
-                    if(covered(car.name,dt)) return null;
-                    const r=resStart(car.name,dt);
-                    const cc=carColor(car.name,cars.map(c=>c.name));
+                  {dates.map((dt,di)=>{
+                    if(di>0&&covered(car,dt)) return null;
+                    const r=findRenderStart(car,dt,di);
+                    const isT=dt===td, isW=isWE(dt);
+                    const d=new Date(dt);
+                    const isFirstOfMonth=d.getDate()===1;
 
                     if(r){
                       const sp=rowSpan(r,di);
                       const isPaid=r.payment_status==="paguar";
                       const isDone=r.status==="Përfunduar";
-                      const isPending=!isPaid&&!isDone;
-                      const cardBg=isDone?"#f9fafb":isPaid?"#f0fdf4":"#fffbeb";
-                      const cardBorder=isDone?"#d1d5db":isPaid?"#4ade80":"#fcd34d";
-                      const cardText=isDone?"#4b5563":isPaid?"#14532d":"#78350f";
-                      const accentColor=isDone?"#9ca3af":isPaid?"#16a34a":"#f59e0b";
+                      const isDelivered=r.status==="Dorëzuar";
+                      const solidBg=isDone?"#9ca3af":isDelivered?"#2563eb":isPaid?"#16a34a":"#f59e0b";
 
                       return (
-                        <td key={car.id} rowSpan={sp} style={{
-                          padding:"3px",
-                          verticalAlign:"top",
-                          borderLeft:"1px solid #e5e7eb",
-                          borderRight:"1px solid #e5e7eb",
-                          borderBottom:"1px solid "+cardBorder+"55",
-                          background:cardBg,
+                        <td key={dt} colSpan={sp} onClick={()=>setDet(r)} style={{
+                          padding:0,
+                          borderTop:"1px solid rgba(255,255,255,0.4)",
+                          borderBottom:"1px solid rgba(255,255,255,0.4)",
+                          borderRight:"1px solid rgba(255,255,255,0.5)",
+                          background:solidBg,
+                          cursor:"pointer",
                         }}>
-                          <div onClick={()=>setDet(r)} style={{
-                            height:sp*48-8,
-                            background:"#fff",
-                            border:"1.5px solid "+cardBorder,
-                            borderLeft:"4px solid "+accentColor,
-                            borderRadius:8,
-                            padding:"6px 7px",
-                            cursor:"pointer",
-                            boxShadow:"0 1px 6px rgba(0,0,0,0.07)",
-                            display:"flex",
-                            flexDirection:"column",
+                          <div style={{
+                            width:sp*DATA_W,
+                            height:ROW_H,
+                            padding:"2px 4px",
                             position:"relative",
                             overflow:"hidden",
+                            display:"flex",
+                            alignItems:"center",
+                            gap:5,
                           }}>
-                            {/* Separator line + centered dot per day */}
-                            {sp>1&&Array.from({length:sp-1}).map((_,ri)=>(
-                              <div key={ri}>
-                                <div style={{
-                                  position:"absolute",
-                                  left:4,right:4,
-                                  top:(ri+1)*48-1,
-                                  height:1,
-                                  background:accentColor+"33",
-                                }}/>
-                                <div style={{
-                                  position:"absolute",
-                                  left:"50%",transform:"translateX(-50%)",
-                                  top:(ri+1)*48-5,
-                                  width:10,height:10,
-                                  borderRadius:"50%",
-                                  background:accentColor,
-                                  boxShadow:"0 0 6px "+accentColor+"99",
-                                  zIndex:2,
-                                }}/>
-                              </div>
+                            {/* Separator lines per day for multi-day spans */}
+                            {sp>1&&Array.from({length:sp-1}).map((_,ci)=>(
+                              <div key={ci} style={{position:"absolute",top:2,bottom:2,left:(ci+1)*DATA_W-1,width:1,background:"rgba(255,255,255,0.35)"}}/>
                             ))}
-                            {/* Content */}
-                            <div style={{display:"flex",alignItems:"center",gap:5}}>
-                              <div style={{width:8,height:8,borderRadius:"50%",background:accentColor,flexShrink:0}}/>
-                              <span style={{fontWeight:800,fontSize:12,color:cardText,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{(r.client_name||"").split(" ")[0]}</span>
-                            </div>
-                            {sp>=2&&<>
-                              <div style={{fontSize:9,color:cardText,opacity:0.65,marginTop:2}}>{fmtD(r.date_from)} → {fmtD(r.date_to)}</div>
-                              <div style={{fontSize:12,fontWeight:800,color:cardText,marginTop:2}}>{fmtM(r.total_price,r.currency)}</div>
-                              <div style={{display:"flex",gap:3,marginTop:3,flexWrap:"wrap"}}>
-                                <span style={{fontSize:9,padding:"2px 6px",borderRadius:20,background:accentColor+"18",color:cardText,fontWeight:700,border:"1px solid "+accentColor+"44"}}>{r.status}</span>
-                                {isPending&&<span style={{fontSize:9,padding:"2px 5px",borderRadius:20,background:"#fef3c7",color:"#92400e",fontWeight:700}}>⏳</span>}
-                              </div>
-                            </>}
+                            <span style={{fontWeight:800,fontSize:10,color:"#fff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textShadow:"0 1px 2px rgba(0,0,0,0.25)"}}>{(r.client_name||"").split(" ")[0]}</span>
+                            {sp>=4&&<span style={{fontSize:9,color:"rgba(255,255,255,0.9)",fontWeight:700,whiteSpace:"nowrap"}}>{fmtM(r.total_price,r.currency)}</span>}
                           </div>
                         </td>
                       );
                     }
 
-                    /* Empty cell - covered by ongoing reservation */
-                    const isActive=reses.some(r=>r.car_name===car.name&&r.status!=="Anuluar"&&dt>=r.date_from&&dt<=r.date_to);
-                    const activeRes=reses.find(r=>r.car_name===car.name&&r.status!=="Anuluar"&&dt>=r.date_from&&dt<=r.date_to);
-                    const activePaid=activeRes?.payment_status==="paguar";
-                    const activeDone=activeRes?.status==="Përfunduar";
-                    const dotColor=activeDone?"#9ca3af":activePaid?"#16a34a":"#f59e0b";
-                    const cellBg=isActive?(activeDone?"#f9fafb":activePaid?"#f0fdf4":"#fffbeb"):(isT?"#eff6ff":isW?"#f9fafb":"#fff");
+                    const cellBg=isT?"#eff6ff":isW?"#f9fafb":"#fff";
                     return (
-                      <td key={car.id} style={{
-                        height:48,
-                        borderLeft:"1px solid #e5e7eb",
-                        borderRight:"1px solid #e5e7eb",
-                        borderBottom:isFirstOfMonth?"2px solid #d1d5db":"1px solid #e5e7eb",
+                      <td key={dt} style={{
+                        width:DATA_W,height:ROW_H,
+                        borderTop:"1px solid #e5e7eb",
+                        borderBottom:"1px solid #e5e7eb",
+                        borderRight:isFirstOfMonth?"2px solid #d1d5db":"1px solid #e5e7eb",
                         background:cellBg,
-                        verticalAlign:"middle",
-                        textAlign:"center",
-                      }}>
-                        {isActive&&(
-                          <div style={{
-                            width:10,height:10,borderRadius:"50%",
-                            background:dotColor,
-                            margin:"0 auto",
-                            boxShadow:"0 0 8px "+dotColor+"bb",
-                          }}/>
-                        )}
-                      </td>
+                      }}/>
                     );
                   })}
                 </tr>
@@ -595,30 +652,45 @@ function CalPage({sess,reload,reloadTick,addLog}) {
       </div>
 
       <div style={{display:"flex",gap:8,marginTop:14,flexWrap:"wrap",alignItems:"center"}}>
-        {[["#16a34a","#dcfce7","Paguar"],["#f59e0b","#fef3c7","Pritje pagese"],["#94a3b8","#f3f4f6","Përfunduar"],["#60a5fa","#eff6ff","Sot"]].map(([ac,bg,lb])=>(
+        {[["#16a34a","Paguar"],["#2563eb","Në përdorim (dorëzuar)"],["#f59e0b","Pritje pagese"],["#9ca3af","Përfunduar"],["#eff6ff","Sot (bosh)"]].map(([bg,lb])=>(
           <div key={lb} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,background:"#fff",border:"1px solid #e2e8f0",borderRadius:20,padding:"4px 12px",boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
-            <div style={{width:10,height:10,borderRadius:3,background:bg,border:"2px solid "+ac}}/>
+            <div style={{width:12,height:12,borderRadius:3,background:bg,border:"1px solid #d1d5db"}}/>
             <span style={{color:"#374151",fontWeight:500}}>{lb}</span>
           </div>
         ))}
-        <div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,background:"#fff",border:"1px solid #e2e8f0",borderRadius:20,padding:"4px 12px"}}>
-          <div style={{width:6,height:6,borderRadius:"50%",background:"#60a5fa"}}/>
-          <span style={{color:"#374151",fontWeight:500}}>Pike = ka rezervim</span>
-        </div>
       </div>
 
-      {det&&<DetModal r={det} sess={sess} addLog={addLog} reload={reload} onClose={()=>setDet(null)} onUpd={u=>setDet(u)}/>}
+      {det&&<DetModal r={det} sess={sess} addLog={addLog} reload={reload} onClose={()=>setDet(null)} onUpd={u=>setDet(u)} cars={cars} reses={reses}/>}
     </div>
   );
 }
 
 // ─── DETAIL MODAL ─────────────────────────────────────────────────────────────
-function DetModal({r,sess,addLog,reload,onClose,onUpd}) {
+function DetModal({r,sess,addLog,reload,onClose,onUpd,cars,reses}) {
+  const [carSetting,setCarSetting]=useState(null);
   const [cur,setCur]=useState(r);
   const [cn,setCn]=useState(r.cond_note||"");
   const [rn,setRn]=useState(r.ret_note||"");
+  const [kmOut,setKmOut]=useState(r.km_out||"");
+  const [kmIn,setKmIn]=useState(r.km_in||"");
   const [saving,setSaving]=useState(false);
   const [saved,setSaved]=useState(false);
+
+  const [payMethod,setPayMethod]=useState("cash");
+  const [depAmt,setDepAmt]=useState("");
+  const [depCurrency,setDepCurrency]=useState(r.currency||"ALL");
+  const [depTx,setDepTx]=useState([]);
+  const [returningDep,setReturningDep]=useState(false);
+
+  useEffect(()=>{
+    sbAuthGet("car_settings","car_name=eq."+encodeURIComponent(cur.car_name),sess.token)
+      .then(rows=>setCarSetting(rows[0]||null)).catch(()=>setCarSetting(null));
+  },[cur.car_name]);
+
+  useEffect(()=>{
+    sbAuthGet("cash_ledger","reference_id=eq."+cur.id+"&type=in.(deposit_in,deposit_out)",sess.token)
+      .then(rows=>setDepTx(rows||[])).catch(()=>setDepTx([]));
+  },[cur.id,saving]);
 
   async function patch(fields) {
     setSaving(true);
@@ -630,42 +702,95 @@ function DetModal({r,sess,addLog,reload,onClose,onUpd}) {
     } catch(e){alert(e.message);}
     setSaving(false);
   }
-  async function addToLedger(amount,currency,type,desc){
+  async function addToLedger(amount,currency,type,desc,refId,method){
     try {
       await sbAuthPost("cash_ledger",{
         currency,
         amount:Number(amount),
         type,
+        method:method||"cash",
         description:desc,
+        reference_id:refId||cur.id,
         created_by:sess.profile?.username||""
       }, sess.token);
     } catch(e){ console.error("addToLedger ERROR:", e.message); }
   }
+  const METHOD_LB={cash:"💵 Cash",pos:"💳 POS",transfer:"🏦 Transfertë"};
   async function doDeliver(){
     const now=new Date().toISOString(), time=new Date().toTimeString().slice(0,5);
-    await patch({status:"Dorëzuar",deliv_at:now,deliv_by:sess.profile?.username,deliv_time:time});
-    addLog("Dorëzim",cur.car_name+" → "+cur.client_name);
+    await patch({status:"Dorëzuar",deliv_at:now,deliv_by:sess.profile?.username,deliv_time:time,km_out:kmOut?Number(kmOut):null});
+    addLog("Dorëzim",cur.car_name+" → "+cur.client_name+(kmOut?" · "+kmOut+" km":""));
   }
   async function doCollect(){
     // Mos shto ne arke nese eshte paguar tashme
     if(cur.payment_status==="paguar") return;
     const now=new Date().toISOString();
-    await patch({payment_status:"paguar",paid_at:now,paid_by:sess.profile?.username});
-    await addToLedger(cur.total_price,cur.currency,"payment","Pagesë: "+cur.car_name+" - "+cur.client_name);
-    addLog("Arkëtim",cur.car_name+" "+fmtM(cur.total_price,cur.currency));
+    const remaining=Number(cur.total_price)-Number(cur.amount_paid||0);
+    await patch({payment_status:"paguar",paid_at:now,paid_by:sess.profile?.username,amount_paid:cur.total_price});
+    await addToLedger(remaining,cur.currency,"payment","Pagesë ("+METHOD_LB[payMethod]+"): "+cur.car_name+" - "+cur.client_name,null,payMethod);
+    addLog("Arkëtim",cur.car_name+" "+fmtM(remaining,cur.currency)+" · "+METHOD_LB[payMethod]);
+  }
+  const [partAmt,setPartAmt]=useState("");
+  const [collecting,setCollecting]=useState(false);
+  async function doCollectPart(){
+    const a=Number(partAmt);
+    if(!a||a<=0) return;
+    setCollecting(true);
+    try {
+      const newPaid=Number(cur.amount_paid||0)+a;
+      const isFull=newPaid>=Number(cur.total_price);
+      const fields=isFull
+        ?{amount_paid:cur.total_price,payment_status:"paguar",paid_at:new Date().toISOString(),paid_by:sess.profile?.username}
+        :{amount_paid:newPaid};
+      await patch(fields);
+      await addToLedger(a,cur.currency,"payment","Pagesë pjesë ("+METHOD_LB[payMethod]+"): "+cur.car_name+" - "+cur.client_name,null,payMethod);
+      addLog("Arkëtim Pjesë",cur.car_name+" "+fmtM(a,cur.currency)+" · "+METHOD_LB[payMethod]);
+      setPartAmt("");
+    } catch(e){alert(e.message);}
+    setCollecting(false);
   }
   async function doDeliverPay(){
     // Mos shto ne arke nese eshte paguar tashme
     if(cur.payment_status==="paguar") return;
     const now=new Date().toISOString(), time=new Date().toTimeString().slice(0,5);
-    await patch({status:"Dorëzuar",deliv_at:now,deliv_by:sess.profile?.username,deliv_time:time,payment_status:"paguar",paid_at:now,paid_by:sess.profile?.username});
-    await addToLedger(cur.total_price,cur.currency,"payment","Pagesë: "+cur.car_name+" - "+cur.client_name);
-    addLog("Dorëzim+Arkëtim",cur.car_name+" "+fmtM(cur.total_price,cur.currency));
+    const remaining=Number(cur.total_price)-Number(cur.amount_paid||0);
+    await patch({status:"Dorëzuar",deliv_at:now,deliv_by:sess.profile?.username,deliv_time:time,payment_status:"paguar",paid_at:now,paid_by:sess.profile?.username,amount_paid:cur.total_price,km_out:kmOut?Number(kmOut):null});
+    await addToLedger(remaining,cur.currency,"payment","Pagesë ("+METHOD_LB[payMethod]+"): "+cur.car_name+" - "+cur.client_name,null,payMethod);
+    addLog("Dorëzim+Arkëtim",cur.car_name+" "+fmtM(remaining,cur.currency)+(kmOut?" · "+kmOut+" km":"")+" · "+METHOD_LB[payMethod]);
+  }
+  const depCur = depTx.length ? depTx[depTx.length-1].currency : depCurrency;
+  const depositHeld = depTx.filter(t=>t.type==="deposit_in").reduce((s,t)=>s+Number(t.amount),0) + depTx.filter(t=>t.type==="deposit_out").reduce((s,t)=>s+Number(t.amount),0);
+  async function doTakeDeposit(){
+    const a=Number(depAmt);
+    if(!a||a<=0) return;
+    await addToLedger(a,depCurrency,"deposit_in","Depozitë: "+cur.car_name+" - "+cur.client_name,cur.id,payMethod);
+    addLog("Merr Depozitë",cur.car_name+" "+fmtM(a,depCurrency));
+    setDepAmt("");
+    sbAuthGet("cash_ledger","reference_id=eq."+cur.id+"&type=in.(deposit_in,deposit_out)",sess.token).then(rows=>setDepTx(rows||[]));
+  }
+  async function doReturnDeposit(){
+    if(depositHeld<=0) return;
+    if(!confirm("Konfirmo kthimin e depozitës "+fmtM(depositHeld,depCur)+" te klienti?")) return;
+    setReturningDep(true);
+    await addToLedger(-depositHeld,depCur,"deposit_out","Kthim depozite: "+cur.car_name+" - "+cur.client_name,cur.id,payMethod);
+    addLog("Kthim Depozitë",cur.car_name+" "+fmtM(depositHeld,depCur));
+    setReturningDep(false);
+    sbAuthGet("cash_ledger","reference_id=eq."+cur.id+"&type=in.(deposit_in,deposit_out)",sess.token).then(rows=>setDepTx(rows||[]));
   }
   async function doReturn(){
+    if(!kmIn){alert("Fut km e makinës në momentin e marrjes");return;}
+    const kmInNum=Number(kmIn);
+    const oilFloor=carSetting?.last_oil_km?Number(carSetting.last_oil_km):0;
+    const priorMaxKm=Math.max(0,...(reses||[]).filter(x=>x.car_name===cur.car_name&&x.id!==cur.id&&x.km_in).map(x=>Number(x.km_in)));
+    const floor=Math.max(oilFloor,priorMaxKm);
+    if(kmInNum<floor){
+      const reason=oilFloor>=priorMaxKm?"kur janë ndërruar vaj/filtrat":"herën e fundit";
+      alert("⚠️ Km e shkruar ("+kmInNum.toLocaleString()+") është më pak se "+floor.toLocaleString()+" km — kjo makinë ka pasur "+floor.toLocaleString()+" km "+reason+". Kontrollo numrin.");
+      return;
+    }
     const now=new Date().toISOString(), time=new Date().toTimeString().slice(0,5);
-    await patch({status:"Përfunduar",ret_at:now,ret_by:sess.profile?.username,ret_time:time,ret_note:rn,cond_note:cn});
-    addLog("Marrje",cur.car_name+" ← "+cur.client_name);
+    await patch({status:"Përfunduar",ret_at:now,ret_by:sess.profile?.username,ret_time:time,ret_note:rn,cond_note:cn,km_in:kmInNum});
+    addLog("Marrje",cur.car_name+" ← "+cur.client_name+" · "+kmIn+" km");
   }
   async function saveNotes(){
     await patch({cond_note:cn,ret_note:rn});
@@ -675,9 +800,11 @@ function DetModal({r,sess,addLog,reload,onClose,onUpd}) {
 
   const paid=cur.payment_status==="paguar";
   const done=cur.status==="Anuluar"||cur.status==="Përfunduar";
+  const amountPaid=Number(cur.amount_paid||0);
+  const debt=Number(cur.total_price||0)-amountPaid;
 
   return (
-    <Modal title={cur.car_name} onClose={onClose}>
+    <Modal title={carLabel(cur.car_name,cars)} onClose={onClose}>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
         {[["Klienti",cur.client_name||"-"],["Telefon",cur.client_phone||"-"],["Nga",fmtFull(cur.date_from)+(cur.pickup_time?" 🕐"+cur.pickup_time:"")],["Deri",fmtFull(cur.date_to)+(cur.return_time?" 🕐"+cur.return_time:"")],["Ditë",diffDays(cur.date_from,cur.date_to)+" ditë"],["Çmim/Ditë",fmtM(cur.price_per_day,cur.currency)]].map(([l,v])=>(
           <div key={l} style={{background:"#f8fafc",borderRadius:7,padding:"7px 10px"}}>
@@ -695,26 +822,89 @@ function DetModal({r,sess,addLog,reload,onClose,onUpd}) {
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <span style={{fontSize:18}}>{paid?"✅":"⏳"}</span>
           <div style={{flex:1}}>
-            <div style={{fontWeight:700,fontSize:13,color:paid?"#166534":"#92400e"}}>{paid?"Paguar":"Pagesa në pritje"}</div>
-            {cur.paid_at&&<div style={{fontSize:11,color:"#64748b"}}>{new Date(cur.paid_at).toLocaleString("sq-AL")} · {cur.paid_by}</div>}
+            <div style={{fontWeight:700,fontSize:13,color:paid?"#166534":"#92400e"}}>{paid?"Paguar":amountPaid>0?"Pagesë e pjesshme":"Pagesa në pritje"}</div>
+            {cur.paid_at&&<div style={{fontSize:11,color:"#64748b"}}>{fmtDT(cur.paid_at)} · {cur.paid_by}</div>}
+            {!paid&&amountPaid>0&&<div style={{fontSize:11,color:"#92400e",marginTop:2}}>Paguar: {fmtM(amountPaid,cur.currency)} · Detyrim: <strong>{fmtM(debt,cur.currency)}</strong></div>}
           </div>
-          {!paid&&!done&&<button onClick={doCollect} disabled={saving} style={{...PB,background:"#16a34a",fontSize:12,padding:"6px 12px"}}>💵 Arkëto</button>}
         </div>
+        {!paid&&!done&&(
+          <>
+            <div style={{display:"flex",gap:5,marginTop:10,marginBottom:8}}>
+              {Object.entries(METHOD_LB).map(([m,lb])=>(
+                <button key={m} onClick={()=>setPayMethod(m)} style={{
+                  flex:1,border:"1px solid "+(payMethod===m?"#1d4ed8":"#e2e8f0"),borderRadius:7,padding:"6px 4px",
+                  fontSize:11,fontWeight:700,cursor:"pointer",
+                  background:payMethod===m?"#eff6ff":"#fff",color:payMethod===m?"#1d4ed8":"#64748b"
+                }}>{lb}</button>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+              <button onClick={doCollect} disabled={saving} style={{...PB,background:"#16a34a",fontSize:12,padding:"7px 12px",whiteSpace:"nowrap"}}>💵 Arkëto Gjithë</button>
+              <input type="number" value={partAmt} onChange={e=>setPartAmt(e.target.value)} placeholder={"Shumë (max "+fmtM(debt,cur.currency)+")"} style={{...FL,flex:1,fontSize:12,padding:"7px 10px"}}/>
+              <button onClick={doCollectPart} disabled={collecting||!partAmt} style={{...PB,background:"#0ea5e9",fontSize:12,padding:"7px 12px",whiteSpace:"nowrap"}}>{collecting?"...":"Pjesë"}</button>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Depozitë */}
+      <div style={{padding:"10px 14px",borderRadius:9,marginBottom:12,background:depositHeld>0?"#eff6ff":"#f8fafc",border:"1px solid "+(depositHeld>0?"#bfdbfe":"#e2e8f0")}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:depositHeld>0?8:0}}>
+          <span style={{fontSize:16}}>🔒</span>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:700,fontSize:13,color:depositHeld>0?"#1e40af":"#64748b"}}>Depozitë</div>
+            {depositHeld>0
+              ? <div style={{fontSize:12,color:"#1e40af"}}>Mban aktualisht: <strong>{fmtM(depositHeld,depCur)}</strong></div>
+              : <div style={{fontSize:11,color:"#94a3b8"}}>Nuk ka depozitë të mbajtur</div>
+            }
+          </div>
+          {depositHeld>0&&(
+            <button onClick={doReturnDeposit} disabled={returningDep} style={{...PB,background:"#7c3aed",fontSize:11,padding:"6px 10px",whiteSpace:"nowrap"}}>↩️ Kthe Depozitën</button>
+          )}
+        </div>
+        {!done&&(
+          <div style={{display:"flex",gap:6}}>
+            <input type="number" value={depAmt} onChange={e=>setDepAmt(e.target.value)} placeholder="Shumë depozitë..." style={{...FL,flex:1,fontSize:12,padding:"7px 10px"}}/>
+            <select value={depCurrency} onChange={e=>setDepCurrency(e.target.value)} style={{...FL,flex:"0 0 80px",fontSize:12,padding:"7px 6px"}}>
+              <option value="ALL">Lekë</option>
+              <option value="EUR">Euro</option>
+            </select>
+            <button onClick={doTakeDeposit} disabled={!depAmt} style={{...PB,background:"#1d4ed8",fontSize:12,padding:"7px 12px",whiteSpace:"nowrap"}}>➕ Merr Depozitë</button>
+          </div>
+        )}
       </div>
 
       {!done&&(
-        <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
-          {(cur.status==="Konfirmuar"||cur.status==="Aktive")&&<>
-            {!paid&&<button onClick={doDeliverPay} disabled={saving} style={{...PB,flex:1,fontSize:12}}>🔑 Dorëzo + Arkëto</button>}
-            <button onClick={doDeliver} disabled={saving} style={{...PB,flex:1,background:"#7c3aed",fontSize:12}}>🔑 Vetëm Dorëzo</button>
-          </>}
-          {cur.status==="Dorëzuar"&&!paid&&<button onClick={doCollect} disabled={saving} style={{...PB,background:"#16a34a",flex:1,fontSize:12}}>💵 Arkëto Pagesen</button>}
-          {cur.status==="Dorëzuar"&&<button onClick={doReturn} disabled={saving} style={{...PB,background:"#059669",flex:1,fontSize:12}}>🏁 Merr Makinën</button>}
+        <div style={{marginBottom:12}}>
+          {(cur.status==="Konfirmuar"||cur.status==="Aktive")&&(
+            <div style={{marginBottom:8}}>
+              <label style={{fontSize:12,fontWeight:700,color:"#374151",display:"block",marginBottom:3}}>🚗 Km në momentin e dorëzimit (opsionale)</label>
+              <input type="number" value={kmOut} onChange={e=>setKmOut(e.target.value)} placeholder="p.sh. 45200" style={FL}/>
+            </div>
+          )}
+          {cur.status==="Dorëzuar"&&(
+            <div style={{marginBottom:8}}>
+              <label style={{fontSize:12,fontWeight:700,color:"#374151",display:"block",marginBottom:3}}>🏁 Km në momentin e marrjes *</label>
+              <input type="number" value={kmIn} onChange={e=>setKmIn(e.target.value)} placeholder="p.sh. 45850" style={FL}/>
+              {cur.km_out&&kmIn&&<div style={{fontSize:11,color:"#64748b",marginTop:3}}>Distanca e përshkuar: <strong>{Number(kmIn)-Number(cur.km_out)} km</strong></div>}
+            </div>
+          )}
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {(cur.status==="Konfirmuar"||cur.status==="Aktive")&&<>
+              {!paid&&<button onClick={doDeliverPay} disabled={saving} style={{...PB,flex:1,fontSize:12}}>🔑 Dorëzo + Arkëto</button>}
+              <button onClick={doDeliver} disabled={saving} style={{...PB,flex:1,background:"#7c3aed",fontSize:12}}>🔑 Vetëm Dorëzo</button>
+            </>}
+            {cur.status==="Dorëzuar"&&!paid&&<button onClick={doCollect} disabled={saving} style={{...PB,background:"#16a34a",flex:1,fontSize:12}}>💵 Arkëto Pagesen</button>}
+            {cur.status==="Dorëzuar"&&<button onClick={doReturn} disabled={saving} style={{...PB,background:"#059669",flex:1,fontSize:12}}>🏁 Merr Makinën</button>}
+          </div>
         </div>
       )}
 
-      {cur.deliv_at&&<div style={{fontSize:11,color:"#64748b",marginBottom:4}}>🔑 Dorëzuar: {new Date(cur.deliv_at).toLocaleString("sq-AL")}{cur.deliv_time?" ora "+cur.deliv_time:""} · {cur.deliv_by}</div>}
-      {cur.ret_at&&<div style={{fontSize:11,color:"#64748b",marginBottom:8}}>🏁 Marrë: {new Date(cur.ret_at).toLocaleString("sq-AL")}{cur.ret_time?" ora "+cur.ret_time:""} · {cur.ret_by}</div>}
+      {cur.km_out&&<div style={{fontSize:11,color:"#64748b",marginBottom:2}}>🚗 Km dorëzimi: <strong>{cur.km_out}</strong></div>}
+      {cur.km_in&&<div style={{fontSize:11,color:"#64748b",marginBottom:2}}>🏁 Km marrja: <strong>{cur.km_in}</strong> {cur.km_out&&<span>· {Number(cur.km_in)-Number(cur.km_out)} km përshkuar</span>}</div>}
+
+      {cur.deliv_at&&<div style={{fontSize:11,color:"#64748b",marginBottom:4}}>🔑 Dorëzuar: {fmtDT(cur.deliv_at)}{cur.deliv_time?" ora "+cur.deliv_time:""} · {cur.deliv_by}</div>}
+      {cur.ret_at&&<div style={{fontSize:11,color:"#64748b",marginBottom:8}}>🏁 Marrë: {fmtDT(cur.ret_at)}{cur.ret_time?" ora "+cur.ret_time:""} · {cur.ret_by}</div>}
 
       <div style={{marginTop:10}}>
         <label style={{fontSize:12,fontWeight:700,color:"#374151",display:"block",marginBottom:3}}>📋 Gjendja kur u dha</label>
@@ -744,9 +934,19 @@ function ResPage({sess,reload,reloadTick,addLog}) {
   const [detId,setDetId]=useState(null);
   const [filt,setFilt]=useState("all");
   const [srch,setSrch]=useState("");
-  const empty={car_name:"",client_name:"",client_phone:"",client_id_card:"",date_from:"",date_to:"",pickup_time:"10:00",return_time:"10:00",price_per_day:"",currency:"ALL",total_price:"",status:"Konfirmuar",payment_status:"pritje",notes:""};
+  const empty={car_name:"",car_id:"",client_name:"",client_phone:"",client_id_card:"",date_from:"",date_to:"",pickup_time:"10:00",return_time:"10:00",price_per_day:"",currency:"ALL",total_price:"",status:"Konfirmuar",payment_status:"pritje",notes:""};
   const [form,setForm]=useState(empty);
   const nd=diffDays(form.date_from,form.date_to);
+
+  const liveConflicts = (form.car_name&&form.date_from&&form.date_to) ? reses.filter(r=>{
+    const sameCar=form.car_id?r.car_id===form.car_id:r.car_name===form.car_name;
+    if(!sameCar) return false;
+    if(r.status==="Anuluar"||r.status==="Përfunduar") return false;
+    if(editId&&r.id===editId) return false;
+    return form.date_from<=r.date_to&&form.date_to>=r.date_from;
+  }) : [];
+  const selectedCarObj = cars.find(c=>c.name===form.car_name);
+  const isPassiveCar = selectedCarObj && selectedCarObj.active===false;
 
   useEffect(()=>{
     setLoading(true);
@@ -768,10 +968,16 @@ function ResPage({sess,reload,reloadTick,addLog}) {
       alert("Data e kthimit nuk mund të jetë para datës së marrjes! Kontrollo datat e zgjedhura.");
       return;
     }
+    const selCarObj=cars.find(c=>c.name===form.car_name);
+    if(selCarObj&&selCarObj.active===false){
+      alert("⚠️ Kjo makinë është PASIVE dhe nuk mund të rezervohet. Kontakto administratorin.");
+      return;
+    }
     try {
-      // Kontrollo disponueshmërinë e makinës
+      // Kontrollo disponueshmërinë e makinës (sipas ID, jo emrit - për të shmangur përzierjen mes makinave me emër të njëjtë)
       const conflicts = reses.filter(r => {
-        if(r.car_name !== form.car_name) return false;
+        const sameCar = form.car_id ? r.car_id===form.car_id : r.car_name===form.car_name;
+        if(!sameCar) return false;
         if(r.status === "Anuluar" || r.status === "Përfunduar") return false;
         if(editId && r.id === editId) return false; // mos kontrollo veten nëse edito
         // Overlap: A.from <= B.to && A.to >= B.from
@@ -783,7 +989,7 @@ function ResPage({sess,reload,reloadTick,addLog}) {
         alert(msg);
         return;
       }
-      const body={...form,price_per_day:Number(form.price_per_day),total_price:Number(form.total_price),created_by:sess.profile?.username};
+      const body={...form,car_id:form.car_id||null,price_per_day:Number(form.price_per_day),total_price:Number(form.total_price),created_by:sess.profile?.username};
       if(editId){
         await sbAuthPatch("reservations",editId,body,sess.token);
         addLog("Ndrysho Rezervim",form.car_name+" - "+form.client_name);
@@ -850,7 +1056,7 @@ function ResPage({sess,reload,reloadTick,addLog}) {
           return <div key={r.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:"12px 14px",marginBottom:8,display:"flex",gap:10,alignItems:"flex-start",borderLeft:"4px solid "+cc.ac,boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
             <div style={{flex:1,minWidth:0}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
-                <div style={{fontWeight:800,fontSize:14,color:"#0f172a"}}>{r.car_name}</div>
+                <div style={{fontWeight:800,fontSize:14,color:"#0f172a"}}>{carLabel(r.car_name,cars)}</div>
                 <div style={{fontSize:15,fontWeight:800,color:"#1d4ed8",flexShrink:0}}>{fmtM(r.total_price,r.currency)}</div>
               </div>
               <div style={{fontSize:13,color:"#374151",marginTop:2}}>👤 {r.client_name}{r.client_phone&&<span style={{color:"#94a3b8"}}> · {r.client_phone}</span>}</div>
@@ -860,7 +1066,7 @@ function ResPage({sess,reload,reloadTick,addLog}) {
                 <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:r.payment_status==="paguar"?"#dcfce7":"#fef3c7",color:r.payment_status==="paguar"?"#166534":"#92400e"}}>{r.payment_status==="paguar"?"✅ Paguar":"⏳ Pritje"}</span>
                 <div style={{flex:1}}/>
                 <button onClick={()=>setDetId(r.id)} style={{...IB,background:"#eff6ff",color:"#1d4ed8",fontWeight:700,fontSize:12,padding:"5px 10px"}}>🔍</button>
-                <button onClick={()=>{setForm({car_name:r.car_name,client_name:r.client_name,client_phone:r.client_phone||"",client_id_card:r.client_id_card||"",date_from:r.date_from,date_to:r.date_to,pickup_time:r.pickup_time||"10:00",return_time:r.return_time||"10:00",price_per_day:r.price_per_day,currency:r.currency,total_price:r.total_price,status:r.status,payment_status:r.payment_status,notes:r.notes||""});setEditId(r.id);setShowF(true)}} style={{...IB,fontSize:12,padding:"5px 10px"}}>✏️</button>
+                <button onClick={()=>{setForm({car_name:r.car_name,car_id:r.car_id||"",client_name:r.client_name,client_phone:r.client_phone||"",client_id_card:r.client_id_card||"",date_from:r.date_from,date_to:r.date_to,pickup_time:r.pickup_time||"10:00",return_time:r.return_time||"10:00",price_per_day:r.price_per_day,currency:r.currency,total_price:r.total_price,status:r.status,payment_status:r.payment_status,notes:r.notes||""});setEditId(r.id);setShowF(true)}} style={{...IB,fontSize:12,padding:"5px 10px"}}>✏️</button>
                 {sess.profile?.role==="admin"&&<button onClick={()=>doDel(r.id)} style={{...IB,color:"#dc2626",fontSize:12,padding:"5px 10px"}}>🗑️</button>}
               </div>
             </div>
@@ -876,19 +1082,23 @@ function ResPage({sess,reload,reloadTick,addLog}) {
           </Fld>
           <Fld label="Telefoni"><input value={form.client_phone} onChange={e=>setForm(f=>({...f,client_phone:e.target.value}))} style={FL}/></Fld>
           <Fld label="Nr. ID"><input value={form.client_id_card} onChange={e=>setForm(f=>({...f,client_id_card:e.target.value}))} style={FL}/></Fld>
-          <Fld label="Makina *" col2><select value={form.car_name} onChange={e=>setForm(f=>({...f,car_name:e.target.value}))} style={FL}>{carNames.map(c=><option key={c}>{c}</option>)}</select></Fld>
-          <Fld label="Nga Data *"><input type="date" value={form.date_from} onChange={e=>setForm(f=>({...f,date_from:e.target.value}))} style={FL}/></Fld>
+          <Fld label="Makina *" col2><CarPicker cars={cars} value={form.car_name} onChange={car=>setForm(f=>({...f,car_name:car.name,car_id:car.id}))}/></Fld>
+          <Fld label="Nga Data *"><DateInput value={form.date_from} onChange={v=>setForm(f=>({...f,date_from:v}))}/></Fld>
           <Fld label="Ora Marrjes"><input type="time" value={form.pickup_time} onChange={e=>setForm(f=>({...f,pickup_time:e.target.value}))} style={FL}/></Fld>
-          <Fld label="Deri Data *"><input type="date" value={form.date_to} min={form.date_from||undefined} onChange={e=>setForm(f=>({...f,date_to:e.target.value}))} style={FL}/></Fld>
+          <Fld label="Deri Data *"><DateInput value={form.date_to} onChange={v=>setForm(f=>({...f,date_to:v}))}/></Fld>
           <Fld label="Ora Dorëzimit"><input type="time" value={form.return_time} onChange={e=>setForm(f=>({...f,return_time:e.target.value}))} style={FL}/></Fld>
           <Fld label="Km kur u dha"><input type="number" value={form.km_out||""} onChange={e=>setForm(f=>({...f,km_out:e.target.value}))} style={FL} placeholder="p.sh. 45200"/></Fld>
           <Fld label="Km kur u kthye"><input type="number" value={form.km_in||""} onChange={e=>setForm(f=>({...f,km_in:e.target.value}))} style={FL} placeholder="p.sh. 46800"/></Fld>
-          {form.car_name&&form.date_from&&form.date_to&&(()=>{
-            const cf=reses.filter(r=>r.car_name===form.car_name&&r.status!=="Anuluar"&&r.status!=="Përfunduar"&&(!editId||r.id!==editId)&&form.date_from<=r.date_to&&form.date_to>=r.date_from);
-            return cf.length>0?<div style={{gridColumn:"span 2",background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#dc2626",fontWeight:600}}>
-              ⚠️ Makina e zënë: {cf.map(r=>r.client_name+" ("+fmtFull(r.date_from)+" - "+fmtFull(r.date_to)+")").join(", ")}
-            </div>:null;
-          })()}
+          {isPassiveCar&&(
+            <div style={{gridColumn:"span 2",background:"#f1f5f9",border:"2px solid #64748b",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#334155",fontWeight:700}}>
+              ⚠️ Kjo makinë është <strong>PASIVE</strong> — nuk mund të rezervohet. Kontakto administratorin.
+            </div>
+          )}
+          {liveConflicts.length>0&&(
+            <div style={{gridColumn:"span 2",background:"#fef2f2",border:"2px solid #dc2626",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#991b1b",fontWeight:700}}>
+              🚫 Makina e ZËNË për këto data! {liveConflicts.map(r=>r.client_name+" ("+fmtFull(r.date_from)+" - "+fmtFull(r.date_to)+")").join(", ")} — zgjidh datë tjetër ose makinë tjetër.
+            </div>
+          )}
           <Fld label={"Çmim/Ditë ("+nd+" d)"}><input type="number" value={form.price_per_day} onChange={e=>setForm(f=>({...f,price_per_day:e.target.value}))} style={FL}/></Fld>
           <Fld label="Monedha"><select value={form.currency} onChange={e=>setForm(f=>({...f,currency:e.target.value}))} style={FL}><option value="ALL">Lekë</option><option value="EUR">Euro</option></select></Fld>
           <Fld label="Totali *" col2><input type="number" value={form.total_price} onChange={e=>setForm(f=>({...f,total_price:e.target.value}))} style={{...FL,fontWeight:700}}/></Fld>
@@ -898,36 +1108,66 @@ function ResPage({sess,reload,reloadTick,addLog}) {
         </div>
         <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16}}>
           <button onClick={()=>setShowF(false)} style={CB}>Anulo</button>
-          <button onClick={doSave} style={PB}>💾 Ruaj</button>
+          <button onClick={doSave} disabled={liveConflicts.length>0||isPassiveCar} style={{...PB,opacity:(liveConflicts.length>0||isPassiveCar)?0.5:1,cursor:(liveConflicts.length>0||isPassiveCar)?"not-allowed":"pointer"}}>💾 Ruaj</button>
         </div>
       </Modal>}
-      {detR&&<DetModal r={detR} sess={sess} addLog={addLog} reload={reload} onClose={()=>setDetId(null)} onUpd={u=>{setDetId(u.id);setReses(rs=>rs.map(x=>x.id===u.id?u:x));}}/>}
+      {detR&&<DetModal r={detR} sess={sess} addLog={addLog} reload={reload} onClose={()=>setDetId(null)} onUpd={u=>{setDetId(u.id);setReses(rs=>rs.map(x=>x.id===u.id?u:x));}} cars={cars} reses={reses}/>}
     </div>
   );
 }
 
 // ─── FINANCE ─────────────────────────────────────────────────────────────────
-function FinPage({sess,reloadTick}) {
+function FinPage({sess,reload,reloadTick,addLog}) {
   const [reses,setReses]=useState([]);
   const [exps,setExps]=useState([]);
   const [cars,setCars]=useState([]);
+  const [ledger,setLedger]=useState([]);
   const [loading,setLoading]=useState(true);
+  const [returningId,setReturningId]=useState(null);
 
   useEffect(()=>{
     setLoading(true);
-    Promise.all([sbAuthGet("reservations","",sess.token),sbAuthGet("expenses","",sess.token),sbAuthGet("cars","order=sort_order.asc",sess.token)])
-      .then(([r,e,c])=>{setReses(r);setExps(e);setCars(c);setLoading(false);}).catch(()=>setLoading(false));
+    Promise.all([sbAuthGet("reservations","",sess.token),sbAuthGet("expenses","",sess.token),sbAuthGet("cars","order=sort_order.asc",sess.token),sbAuthGet("cash_ledger","",sess.token)])
+      .then(([r,e,c,l])=>{setReses(r);setExps(e);setCars(c);setLedger(l);setLoading(false);}).catch(()=>setLoading(false));
   },[reloadTick,sess.token]);
 
   if(loading) return <Spin/>;
 
-  const paid=reses.filter(r=>r.payment_status==="paguar"&&r.status!=="Anuluar");
-  const incL=paid.filter(r=>r.currency==="ALL").reduce((s,r)=>s+Number(r.total_price),0);
-  const incE=paid.filter(r=>r.currency==="EUR").reduce((s,r)=>s+Number(r.total_price),0);
+  // Depozitat e mbajtura (te pa-kthyera) - grupuar sipas rezervimit
+  const resById={}; reses.forEach(r=>{resById[r.id]=r;});
+  const depGroups={};
+  ledger.filter(l=>l.type==="deposit_in"||l.type==="deposit_out").forEach(l=>{
+    const rid=l.reference_id; if(!rid) return;
+    if(!depGroups[rid]) depGroups[rid]={reservation:resById[rid],held:0,currency:l.currency};
+    depGroups[rid].held += Number(l.amount);
+    depGroups[rid].currency=l.currency;
+  });
+  const heldDeposits=Object.entries(depGroups).filter(([,g])=>g.held>0.01&&g.reservation);
+
+  async function returnDeposit(rid,g){
+    if(!confirm("Konfirmo kthimin e depozitës "+fmtM(g.held,g.currency)+" te "+g.reservation.client_name+"?")) return;
+    setReturningId(rid);
+    try {
+      await sbAuthPost("cash_ledger",{
+        currency:g.currency, amount:-g.held, type:"deposit_out", method:"cash",
+        description:"Kthim depozite: "+g.reservation.car_name+" - "+g.reservation.client_name,
+        reference_id:rid, created_by:sess.profile?.username||""
+      },sess.token);
+      addLog&&addLog("Kthim Depozitë",g.reservation.car_name+" "+fmtM(g.held,g.currency));
+      reload&&reload();
+      setLedger(ls=>[...ls,{type:"deposit_out",amount:-g.held,currency:g.currency,reference_id:rid}]);
+    } catch(e){ alert(e.message); }
+    setReturningId(null);
+  }
+
+  const paid=reses.filter(r=>r.status!=="Anuluar"&&Number(r.amount_paid||0)>0);
+  // Të ardhurat vijnë nga cash_ledger (arkëtime + hyrje manuale) - reflekton çdo arkëtim real, i plotë ose i pjesshëm
+  const incL=ledger.filter(l=>l.currency==="ALL"&&(l.type==="payment"||l.type==="manual_in")).reduce((s,l)=>s+Number(l.amount),0);
+  const incE=ledger.filter(l=>l.currency==="EUR"&&(l.type==="payment"||l.type==="manual_in")).reduce((s,l)=>s+Number(l.amount),0);
   const expL=exps.filter(e=>e.currency==="ALL").reduce((s,e)=>s+Number(e.amount),0);
   const expE=exps.filter(e=>e.currency==="EUR").reduce((s,e)=>s+Number(e.amount),0);
   const carNames=cars.map(c=>c.name);
-  const maxInc=Math.max(...carNames.map(cn=>paid.filter(r=>r.car_name===cn).reduce((s,r)=>s+Number(r.total_price)*(r.currency==="EUR"?108:1),0)),1);
+  const maxInc=Math.max(...carNames.map(cn=>paid.filter(r=>r.car_name===cn).reduce((s,r)=>s+Number(r.amount_paid)*(r.currency==="EUR"?108:1),0)),1);
 
   return (
     <div style={{padding:14,maxWidth:1000,margin:"0 auto"}}>
@@ -948,12 +1188,30 @@ function FinPage({sess,reloadTick}) {
         ))}
       </div>
 
+      {heldDeposits.length>0&&(
+        <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,padding:20,marginBottom:16}}>
+          <h3 style={{margin:"0 0 14px",fontSize:15,fontWeight:700,color:"#0f172a"}}>🔒 Depozita të Mbajtura — Kthim te Klientët</h3>
+          {heldDeposits.map(([rid,g])=>(
+            <div key={rid} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:"1px solid #f1f5f9"}}>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700,fontSize:13,color:"#0f172a"}}>{g.reservation.client_name}</div>
+                <div style={{fontSize:11,color:"#94a3b8"}}>{carLabel(g.reservation.car_name,cars)}</div>
+              </div>
+              <div style={{fontWeight:800,fontSize:15,color:"#1e40af"}}>{fmtM(g.held,g.currency)}</div>
+              <button onClick={()=>returnDeposit(rid,g)} disabled={returningId===rid} style={{...PB,background:"#7c3aed",fontSize:12,padding:"7px 14px",whiteSpace:"nowrap"}}>
+                {returningId===rid?"...":"↩️ Kthe"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,padding:20,marginBottom:16}}>
         <h3 style={{margin:"0 0 16px",fontSize:15,fontWeight:700,color:"#0f172a"}}>🚗 Të Ardhura Sipas Makinës</h3>
         {carNames.map(cn=>{
           const carReses=paid.filter(r=>r.car_name===cn);
-          const iL=carReses.filter(r=>r.currency==="ALL").reduce((s,r)=>s+Number(r.total_price),0);
-          const iE=carReses.filter(r=>r.currency==="EUR").reduce((s,r)=>s+Number(r.total_price),0);
+          const iL=carReses.filter(r=>r.currency==="ALL").reduce((s,r)=>s+Number(r.amount_paid),0);
+          const iE=carReses.filter(r=>r.currency==="EUR").reduce((s,r)=>s+Number(r.amount_paid),0);
           const eL=exps.filter(e=>e.car_name===cn&&e.currency==="ALL").reduce((s,e)=>s+Number(e.amount),0);
           const eE=exps.filter(e=>e.car_name===cn&&e.currency==="EUR").reduce((s,e)=>s+Number(e.amount),0);
           const totalInc=iL+iE*108;
@@ -963,7 +1221,7 @@ function FinPage({sess,reloadTick}) {
           const totalDays=allR.reduce((s,r)=>s+diffDays(r.date_from,r.date_to),0);
           return <div key={cn} style={{marginBottom:14}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-              <span style={{fontSize:13,fontWeight:700,color:cc.tx}}>{cn}</span>
+              <span style={{fontSize:13,fontWeight:700,color:cc.tx}}>{carLabel(cn,cars)}</span>
               <div style={{display:"flex",gap:12,fontSize:12}}>
                 {iL>0&&<span style={{color:"#1d4ed8",fontWeight:700}}>{iL.toLocaleString("sq-AL")} L</span>}
                 {iE>0&&<span style={{color:"#059669",fontWeight:700}}>€{iE.toFixed(2)}</span>}
@@ -981,7 +1239,7 @@ function FinPage({sess,reloadTick}) {
       <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,padding:20,marginBottom:16}}>
         <h3 style={{margin:"0 0 14px",fontSize:15,fontWeight:700,color:"#0f172a"}}>📈 Statistika</h3>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10}}>
-          {[["Rezervime","Totale",reses.filter(r=>r.status!=="Anuluar").length,"#1d4ed8"],["✅","Paguar",paid.length,"#16a34a"],["⏳","Pritje",reses.filter(r=>r.payment_status==="pritje"&&r.status!=="Anuluar").length,"#d97706"],["📤","Shpenzime",exps.length,"#dc2626"]].map(([ic,lb,val,col])=>(
+          {[["Rezervime","Totale",reses.filter(r=>r.status!=="Anuluar").length,"#1d4ed8"],["✅","Paguar Plotësisht",reses.filter(r=>r.payment_status==="paguar"&&r.status!=="Anuluar").length,"#16a34a"],["⏳","Pritje/Pjesë",reses.filter(r=>r.payment_status==="pritje"&&r.status!=="Anuluar").length,"#d97706"],["📤","Shpenzime",exps.length,"#dc2626"]].map(([ic,lb,val,col])=>(
             <div key={lb} style={{background:"#f8fafc",borderRadius:10,padding:"12px 14px",textAlign:"center",border:"1px solid #e2e8f0"}}>
               <div style={{fontSize:22,fontWeight:800,color:col}}>{val}</div>
               <div style={{fontSize:11,color:"#64748b",marginTop:2,fontWeight:500}}>{lb}</div>
@@ -1089,7 +1347,7 @@ function OccupancyChart({reses, cars, carNames}) {
               {/* Donut */}
               <Donut pct={pct} color={col} size={80}/>
               {/* Car name */}
-              <div style={{fontSize:10,fontWeight:800,color:cc.tx,marginTop:8,lineHeight:1.3}}>{cn}</div>
+              <div style={{fontSize:10,fontWeight:800,color:cc.tx,marginTop:8,lineHeight:1.3}}>{carObj?.targa||cn}</div>
               {/* Days detail */}
               <div style={{fontSize:10,color:"#94a3b8",marginTop:3}}>
                 {occ}/{totalDays} ditë
@@ -1183,16 +1441,7 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
       reload(); setShowE(false); setEf({description:"",amount:"",currency:"ALL",category:"Mirëmbajtje",car_name:"",expense_date:todayY()});
     } catch(e){alert(e.message);}
   }
-  async function delExp(id){
-    const e=exps.find(x=>x.id===id);
-    if(!e) return;
-    try {
-      await sbAuthDelete("expenses",id,sess.token);
-      await sbAuthPost("cash_ledger",{currency:e.currency,amount:Number(e.amount),type:"manual_in",description:"Anulim shpenzimi: "+e.description,created_by:sess.profile?.username},sess.token);
-      addLog("Fshi Shpenzim",e.description);
-      reload();
-    } catch(ex){alert(ex.message);}
-  }
+  // Fshirja e shpenzimeve/levizjeve te arkes eshte e ndaluar qellimisht per integritet te regjistrit financiar.
 
   // Build statement rows - sorted ascending for running balance
   const curCur=arkTab==="lek"?"ALL":"EUR";
@@ -1339,9 +1588,9 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
             <button onClick={exportPDF} style={{padding:"5px 10px",borderRadius:7,background:"#dc2626",border:"none",color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}}>🖨️ PDF</button>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
-            <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} style={{flex:1,padding:"5px 6px",borderRadius:6,border:"1px solid rgba(255,255,255,0.3)",background:"rgba(255,255,255,0.1)",color:"#fff",fontSize:11,fontFamily:"inherit",minWidth:0}}/>
+            <DateInput value={dateFrom} onChange={setDateFrom} style={{flex:1,padding:"5px 6px",borderRadius:6,border:"1px solid rgba(255,255,255,0.3)",background:"rgba(255,255,255,0.1)",color:"#fff",fontSize:11,fontFamily:"inherit",minWidth:0}}/>
             <span style={{fontSize:10,opacity:0.7,flexShrink:0}}>→</span>
-            <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)} style={{flex:1,padding:"5px 6px",borderRadius:6,border:"1px solid rgba(255,255,255,0.3)",background:"rgba(255,255,255,0.1)",color:"#fff",fontSize:11,fontFamily:"inherit",minWidth:0}}/>
+            <DateInput value={dateTo} onChange={setDateTo} style={{flex:1,padding:"5px 6px",borderRadius:6,border:"1px solid rgba(255,255,255,0.3)",background:"rgba(255,255,255,0.1)",color:"#fff",fontSize:11,fontFamily:"inherit",minWidth:0}}/>
             {(dateFrom||dateTo)&&<button onClick={()=>{setDateFrom("");setDateTo("");}} style={{padding:"4px 8px",borderRadius:5,background:"rgba(255,255,255,0.15)",border:"none",color:"#fff",fontSize:12,cursor:"pointer",flexShrink:0}}>✕</button>}
           </div>
         </div>
@@ -1369,7 +1618,7 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
                 <div style={{width:30,height:30,borderRadius:"50%",background:pos?"#dcfce7":"#fee2e2",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,flexShrink:0}}>{pos?"📥":"📤"}</div>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:13,fontWeight:600,color:"#0f172a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.description||r.type}</div>
-                  <div style={{fontSize:11,color:"#94a3b8"}}>{r.type} · {r.created_at?r.created_at.slice(0,10):""}</div>
+                  <div style={{fontSize:11,color:"#94a3b8"}}>{r.type} · {r.created_at?fmtFull(r.created_at.slice(0,10)):""}</div>
                 </div>
                 <div style={{textAlign:"right",flexShrink:0}}>
                   <div style={{fontWeight:700,fontSize:13,color:pos?"#16a34a":"#dc2626"}}>{pos?"+":"-"}{isL?Math.abs(Number(r.amount)).toLocaleString("sq-AL")+" L":"€"+Math.abs(Number(r.amount)).toFixed(2)}</div>
@@ -1418,8 +1667,8 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
           <Fld label="Shuma *"><input type="number" value={ef.amount} onChange={e=>setEf(f=>({...f,amount:e.target.value}))} style={FL}/></Fld>
           <Fld label="Monedha"><select value={ef.currency} onChange={e=>setEf(f=>({...f,currency:e.target.value}))} style={FL}><option value="ALL">Lekë</option><option value="EUR">Euro</option></select></Fld>
           <Fld label="Kategoria"><select value={ef.category} onChange={e=>setEf(f=>({...f,category:e.target.value}))} style={FL}>{CATS.map(c=><option key={c}>{c}</option>)}</select></Fld>
-          <Fld label="Makina"><select value={ef.car_name} onChange={e=>setEf(f=>({...f,car_name:e.target.value}))} style={FL}><option value="">— Të gjitha —</option>{carNames.map(c=><option key={c}>{c}</option>)}</select></Fld>
-          <Fld label="Data"><input type="date" value={ef.expense_date} onChange={e=>setEf(f=>({...f,expense_date:e.target.value}))} style={FL}/></Fld>
+          <Fld label="Makina"><CarPicker cars={cars} value={ef.car_name} onChange={car=>setEf(f=>({...f,car_name:car.name}))} placeholder="🔍 Kërko targën (ose lëre bosh)"/></Fld>
+          <Fld label="Data"><DateInput value={ef.expense_date} onChange={v=>setEf(f=>({...f,expense_date:v}))}/></Fld>
         </div>
         <div style={{background:"#fef3c7",border:"1px solid #fde68a",borderRadius:7,padding:"8px 12px",marginTop:8,fontSize:12,color:"#92400e"}}>⚠️ Shuma zbritet automatikisht nga arka.</div>
         <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
@@ -1460,22 +1709,34 @@ function CliPage({sess,reload,reloadTick,addLog}) {
     try { await sbAuthDelete("clients",id,sess.token); addLog("Fshi Klient",cl?.name||""); reload(); } catch(e){alert(e.message);}
   }
 
+  const [onlyDebt,setOnlyDebt]=useState(false);
   const filtered=clients.filter(c=>!srch||c.name.toLowerCase().includes(srch.toLowerCase())||c.phone?.includes(srch)||c.id_card?.includes(srch));
   if(loading) return <Spin/>;
+
+  function clientStats(cl){
+    const clReses=reses.filter(r=>r.client_name===cl.name&&r.status!=="Anuluar");
+    const fatL=clReses.filter(r=>r.currency==="ALL").reduce((s,r)=>s+Number(r.total_price||0),0);
+    const fatE=clReses.filter(r=>r.currency==="EUR").reduce((s,r)=>s+Number(r.total_price||0),0);
+    const payL=clReses.filter(r=>r.currency==="ALL").reduce((s,r)=>s+Number(r.amount_paid||0),0);
+    const payE=clReses.filter(r=>r.currency==="EUR").reduce((s,r)=>s+Number(r.amount_paid||0),0);
+    return {count:clReses.length,fatL,fatE,payL,payE,detL:fatL-payL,detE:fatE-payE};
+  }
+  const filteredFinal=onlyDebt?filtered.filter(cl=>{const s=clientStats(cl);return s.detL>0||s.detE>0;}):filtered;
 
   return (
     <div style={{padding:14,maxWidth:800,margin:"0 auto"}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
         <h2 style={{margin:0,fontSize:17,fontWeight:700,color:"#0f172a",flex:1}}>👥 Klientët</h2>
+        <label style={{display:"flex",alignItems:"center",gap:5,fontSize:12,color:"#dc2626",fontWeight:600,cursor:"pointer"}}>
+          <input type="checkbox" checked={onlyDebt} onChange={e=>setOnlyDebt(e.target.checked)}/> Vetëm me detyrime
+        </label>
         <input value={srch} onChange={e=>setSrch(e.target.value)} placeholder="Kërko..." style={{padding:"7px 11px",borderRadius:8,border:"1px solid #e2e8f0",fontSize:13,width:180,fontFamily:"inherit"}}/>
         <button onClick={()=>{setForm({name:"",phone:"",email:"",id_card:"",address:"",notes:""});setEditId(null);setShowF(true)}} style={PB}>+ Klient i Ri</button>
       </div>
-      {filtered.length===0
+      {filteredFinal.length===0
         ? <div style={{textAlign:"center",color:"#94a3b8",padding:48,background:"#fff",borderRadius:12,border:"1px solid #e2e8f0"}}>Asnjë klient.</div>
-        : filtered.map(cl=>{
-          const clReses=reses.filter(r=>r.client_name===cl.name);
-          const totL=clReses.filter(r=>r.currency==="ALL"&&r.payment_status==="paguar").reduce((s,r)=>s+Number(r.total_price),0);
-          const totE=clReses.filter(r=>r.currency==="EUR"&&r.payment_status==="paguar").reduce((s,r)=>s+Number(r.total_price),0);
+        : filteredFinal.map(cl=>{
+          const st=clientStats(cl);
           return <div key={cl.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:"14px 16px",marginBottom:8,boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
             <div style={{display:"flex",alignItems:"flex-start",gap:12}}>
               <div style={{width:42,height:42,borderRadius:"50%",background:"linear-gradient(135deg,#1d4ed8,#7c3aed)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:800,fontSize:17,flexShrink:0}}>{cl.name.charAt(0).toUpperCase()}</div>
@@ -1488,10 +1749,14 @@ function CliPage({sess,reload,reloadTick,addLog}) {
                 </div>
                 {cl.address&&<div style={{fontSize:12,color:"#94a3b8",marginTop:2}}>📍 {cl.address}</div>}
                 <div style={{display:"flex",gap:6,marginTop:6,flexWrap:"wrap"}}>
-                  <span style={{fontSize:11,padding:"2px 8px",borderRadius:20,background:"#dbeafe",color:"#1e40af",fontWeight:700}}>{clReses.length} rezervime</span>
-                  {totL>0&&<span style={{fontSize:11,padding:"2px 8px",borderRadius:20,background:"#dcfce7",color:"#166534",fontWeight:700}}>{totL.toLocaleString("sq-AL")} L</span>}
-                  {totE>0&&<span style={{fontSize:11,padding:"2px 8px",borderRadius:20,background:"#dcfce7",color:"#166534",fontWeight:700}}>€{totE.toFixed(2)}</span>}
+                  <span style={{fontSize:11,padding:"2px 8px",borderRadius:20,background:"#dbeafe",color:"#1e40af",fontWeight:700}}>{st.count} rezervime</span>
                 </div>
+                {(st.fatL>0||st.fatE>0)&&(
+                  <div style={{display:"flex",gap:14,marginTop:8,flexWrap:"wrap",background:"#f8fafc",borderRadius:8,padding:"7px 10px"}}>
+                    {st.fatL>0&&<MiniStat lb="LEKË" fat={st.fatL} pag={st.payL} det={st.detL} isL/>}
+                    {st.fatE>0&&<MiniStat lb="EURO" fat={st.fatE} pag={st.payE} det={st.detE}/>}
+                  </div>
+                )}
               </div>
               <div style={{display:"flex",gap:5}}>
                 <button onClick={()=>{setForm({name:cl.name,phone:cl.phone||"",email:cl.email||"",id_card:cl.id_card||"",address:cl.address||"",notes:cl.notes||""});setEditId(cl.id);setShowF(true)}} style={IB}>✏️</button>
@@ -1520,72 +1785,339 @@ function CliPage({sess,reload,reloadTick,addLog}) {
   );
 }
 
+function MiniStat({lb,fat,pag,det,isL}){
+  const fmt=v=>isL?Number(v).toLocaleString("sq-AL")+" L":"€"+Number(v).toFixed(2);
+  return (
+    <div style={{fontSize:11,lineHeight:1.5}}>
+      <div style={{fontWeight:700,color:"#64748b",marginBottom:2}}>{lb}</div>
+      <div style={{color:"#1d4ed8"}}>Faturuar: <strong>{fmt(fat)}</strong></div>
+      <div style={{color:"#16a34a"}}>Paguar: <strong>{fmt(pag)}</strong></div>
+      {det>0.01&&<div style={{color:"#dc2626"}}>Detyrim: <strong>{fmt(det)}</strong></div>}
+    </div>
+  );
+}
+
+function CarPicker({cars,value,onChange,placeholder}) {
+  const [q,setQ]=useState("");
+  const [open,setOpen]=useState(false);
+  const wrapRef=useRef(null);
+  useEffect(()=>{
+    function onDoc(e){ if(wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown",onDoc);
+    return ()=>document.removeEventListener("mousedown",onDoc);
+  },[]);
+  const selCar=cars.find(c=>c.name===value);
+  const label=selCar?(selCar.targa?selCar.targa+(selCar.model?" · "+selCar.model:""):selCar.name):"";
+  const selectableCars=cars.filter(c=>c.active!==false);
+  const filtered=selectableCars.filter(c=>{
+    const s=(c.targa||"")+" "+(c.model||c.name||"");
+    return !q||s.toLowerCase().includes(q.toLowerCase());
+  });
+  return (
+    <div ref={wrapRef} style={{position:"relative"}}>
+      <input
+        value={open?q:label}
+        onFocus={()=>{setOpen(true);setQ("");}}
+        onChange={e=>setQ(e.target.value)}
+        placeholder={placeholder||"🔍 Kërko targën..."}
+        style={FL}
+      />
+      {open&&(
+        <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:50,background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,marginTop:4,maxHeight:220,overflowY:"auto",boxShadow:"0 4px 16px rgba(0,0,0,0.14)"}}>
+          {filtered.length===0&&<div style={{padding:"10px 12px",fontSize:12,color:"#94a3b8"}}>Nuk u gjet asnjë makinë</div>}
+          {filtered.map(c=>(
+            <div key={c.id} onMouseDown={e=>e.preventDefault()} onClick={()=>{onChange(c);setOpen(false);setQ("");}}
+              style={{padding:"9px 12px",cursor:"pointer",fontSize:13,borderBottom:"1px solid #f1f5f9",background:c.name===value?"#eff6ff":"#fff"}}>
+              <strong>{c.targa||"— pa targë —"}</strong>
+              <span style={{color:"#64748b"}}>{c.model?" · "+c.model:(!c.targa&&c.name)?" · "+c.name:""}</span>
+              {c.active===false&&<span style={{marginLeft:6,fontSize:10,fontWeight:700,color:"#94a3b8"}}>(Pasive)</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function exportToExcel(rows,filename,sheetName){
+  if(!rows||!rows.length){ alert("Nuk ka të dhëna për të exportuar."); return; }
+  const ws=XLSX.utils.json_to_sheet(rows);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,sheetName||"Raport");
+  XLSX.writeFile(wb,filename);
+}
+
 // ─── RAPORT PAGE ─────────────────────────────────────────────────────────────
+function CarMultiPicker({cars,selected,onChange}){
+  const [open,setOpen]=useState(false);
+  const [q,setQ]=useState("");
+  const wrapRef=useRef(null);
+  useEffect(()=>{
+    function onDoc(e){ if(wrapRef.current&&!wrapRef.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown",onDoc);
+    return ()=>document.removeEventListener("mousedown",onDoc);
+  },[]);
+  const filtered=cars.filter(c=>{
+    const s=(c.targa||"")+" "+(c.model||c.name||"");
+    return !q||s.toLowerCase().includes(q.toLowerCase());
+  });
+  function toggle(name){
+    onChange(selected.includes(name)?selected.filter(n=>n!==name):[...selected,name]);
+  }
+  return (
+    <div ref={wrapRef} style={{position:"relative"}}>
+      <div onClick={()=>setOpen(o=>!o)} style={{...FL,cursor:"pointer",display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",minHeight:20}}>
+        {selected.length===0
+          ? <span style={{color:"#94a3b8"}}>🚗 Të gjitha makinat</span>
+          : selected.map(n=>{
+              const c=cars.find(x=>x.name===n);
+              return <span key={n} onClick={e=>{e.stopPropagation();toggle(n);}} style={{background:"#dbeafe",color:"#1e40af",fontSize:11,fontWeight:700,padding:"2px 7px",borderRadius:12,cursor:"pointer"}}>{c?.targa||n} ✕</span>;
+            })
+        }
+      </div>
+      {open&&(
+        <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:50,background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,marginTop:4,maxHeight:260,overflowY:"auto",boxShadow:"0 4px 16px rgba(0,0,0,0.14)"}}>
+          <input autoFocus value={q} onChange={e=>setQ(e.target.value)} placeholder="🔍 Kërko targën..." style={{...FL,border:"none",borderBottom:"1px solid #e2e8f0",borderRadius:0}}/>
+          {selected.length>0&&<div onClick={()=>onChange([])} style={{padding:"7px 12px",fontSize:12,color:"#dc2626",cursor:"pointer",fontWeight:600,borderBottom:"1px solid #f1f5f9"}}>✕ Pastro të gjitha</div>}
+          {filtered.map(c=>(
+            <div key={c.id} onClick={()=>toggle(c.name)} style={{padding:"8px 12px",cursor:"pointer",fontSize:13,display:"flex",alignItems:"center",gap:8,background:selected.includes(c.name)?"#eff6ff":"#fff"}}>
+              <input type="checkbox" checked={selected.includes(c.name)} onChange={()=>{}}/>
+              <strong>{c.targa||"—"}</strong><span style={{color:"#64748b"}}>{c.model?" · "+c.model:""}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RptPage({sess,reloadTick}) {
   const [reses,setReses]=useState([]);
   const [exps,setExps]=useState([]);
+  const [ledger,setLedger]=useState([]);
   const [cars,setCars]=useState([]);
+  const [clients,setClients]=useState([]);
+  const [srvs,setSrvs]=useState([]);
+  const [carSettings,setCarSettings]=useState([]);
   const [loading,setLoading]=useState(true);
-  const [selCar,setSelCar]=useState("all");
+  const [tab,setTab]=useState("cars");
+  const [view,setView]=useState("summary");
+  const [selCars,setSelCars]=useState([]);
+  const [selDocTypes,setSelDocTypes]=useState([]);
+  const [selClient,setSelClient]=useState("");
+  const [dFrom,setDFrom]=useState("");
+  const [dTo,setDTo]=useState("");
+  const [shown,setShown]=useState(false);
+  const [filtersOpen,setFiltersOpen]=useState("cars");
+
+  function chTab(id){
+    if(tab===id){
+      setFiltersOpen(o=>o===id?null:id);
+    } else {
+      setTab(id);
+      setFiltersOpen(id);
+      setShown(false);
+    }
+  }
+  function chView(v){ setView(v); setShown(false); }
+  function chCars(v){ setSelCars(v); setShown(false); }
+  function chDocType(t){ setSelDocTypes(s=>s.includes(t)?s.filter(x=>x!==t):[...s,t]); setShown(false); }
+  function chClient(v){ setSelClient(v); setShown(false); }
+  function chFrom(v){ setDFrom(v); setShown(false); }
+  function chTo(v){ setDTo(v); setShown(false); }
 
   useEffect(()=>{
     setLoading(true);
     Promise.all([
       sbAuthGet("reservations","",sess.token),
       sbAuthGet("expenses","",sess.token),
-      sbAuthGet("cars","order=sort_order.asc",sess.token)
-    ]).then(([r,e,cr])=>{setReses(r);setExps(e);setCars(cr);setLoading(false);}).catch(()=>setLoading(false));
+      sbAuthGet("cash_ledger","",sess.token),
+      sbAuthGet("cars","order=sort_order.asc",sess.token),
+      sbAuthGet("clients","",sess.token),
+      sbAuthGet("car_services","",sess.token),
+      sbAuthGet("car_settings","",sess.token)
+    ]).then(([r,e,l,cr,cl,sv,cset])=>{setReses(r);setExps(e);setLedger(l);setCars(cr);setClients(cl);setSrvs(sv);setCarSettings(cset);setLoading(false);}).catch(()=>setLoading(false));
   },[reloadTick,sess.token]);
 
   if(loading) return <Spin/>;
 
-  const carNames=cars.map(c=>c.name);
-  const filtCars=selCar==="all"?carNames:[selCar];
+  function inRange(d){ if(!d) return true; return (!dFrom||d>=dFrom)&&(!dTo||d<=dTo); }
+  const carSet = selCars.length ? new Set(selCars) : null;
+  const resIdToCar={}; reses.forEach(r=>{resIdToCar[r.id]=r.car_name;});
 
+  const fReses=reses.filter(r=>r.status!=="Anuluar"&&(!carSet||carSet.has(r.car_name))&&inRange(r.date_from));
+  const fExps=exps.filter(e=>(!carSet||carSet.has(e.car_name))&&inRange(e.date||e.expense_date));
+  const fLedger=ledger.filter(l=>{
+    const d=(l.created_at||"").slice(0,10);
+    if(!inRange(d)) return false;
+    if(!carSet) return true;
+    const cn=resIdToCar[l.reference_id];
+    return cn&&carSet.has(cn);
+  });
+  const fSrvs=srvs.filter(s=>!carSet||carSet.has(s.car_name));
+  const fCarSettings=carSettings.filter(cs=>!carSet||carSet.has(cs.car_name));
+
+  const REPORT_TABS=[["cars","🚗 Makina & Rezervime"],["finance","💰 Lëvizjet e Arkës"],["cli","👥 Klientët"],["docs","⏰ Skadimet"],["deposits","🔒 Depozitat"]];
+
+  return (
+    <div style={{padding:14,display:"flex",gap:16,alignItems:"flex-start"}}>
+      {/* SIDEBAR - filtrat hapen direkt poshte tab-it aktiv */}
+      <div style={{width:250,flexShrink:0,background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,overflow:"hidden",position:"sticky",top:14}}>
+        {REPORT_TABS.map(([id,lb])=>(
+          <div key={id}>
+            <div onClick={()=>chTab(id)} style={{
+              padding:"12px 14px",fontSize:13,fontWeight:700,cursor:"pointer",
+              background:tab===id?"#eff6ff":"#fff",color:tab===id?"#1d4ed8":"#374151",
+              borderLeft:tab===id?"3px solid #1d4ed8":"3px solid transparent",
+              borderBottom:"1px solid #f1f5f9",
+              display:"flex",alignItems:"center",justifyContent:"space-between",gap:6
+            }}>
+              <span>{lb}</span>
+              <span style={{fontSize:10,color:"#94a3b8"}}>{filtersOpen===id?"▾":"▸"}</span>
+            </div>
+
+            {filtersOpen===id&&(
+              <div style={{padding:"12px 14px",background:"#f8fafc",borderBottom:"1px solid #e2e8f0",display:"flex",flexDirection:"column",gap:10}}>
+                <div>
+                  <label style={{fontSize:11,fontWeight:700,color:"#64748b",display:"block",marginBottom:3}}>Nga data</label>
+                  <DateInput value={dFrom} onChange={chFrom}/>
+                </div>
+                <div>
+                  <label style={{fontSize:11,fontWeight:700,color:"#64748b",display:"block",marginBottom:3}}>Deri</label>
+                  <DateInput value={dTo} onChange={chTo}/>
+                </div>
+                {tab==="cli"&&(
+                  <div>
+                    <label style={{fontSize:11,fontWeight:700,color:"#64748b",display:"block",marginBottom:3}}>Klienti (bosh = të gjithë)</label>
+                    <select value={selClient} onChange={e=>chClient(e.target.value)} style={FL}>
+                      <option value="">👥 Të gjithë klientët</option>
+                      {clients.map(c=><option key={c.id} value={c.name}>{c.name}{c.phone?" · "+c.phone:""}</option>)}
+                    </select>
+                  </div>
+                )}
+                <div>
+                  <label style={{fontSize:11,fontWeight:700,color:"#64748b",display:"block",marginBottom:3}}>Makinat (bosh = të gjitha)</label>
+                  <CarMultiPicker cars={cars} selected={selCars} onChange={chCars}/>
+                </div>
+                {tab==="docs"&&(
+                  <div>
+                    <label style={{fontSize:11,fontWeight:700,color:"#64748b",display:"block",marginBottom:5}}>Lloji i shërbimit</label>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                      {[["sigurim","🛡️ Sigurim"],["kasko","🚙 Kasko"],["kolaudim","🔍 Kolaudim"],["taksa","💼 Taksa"],["vaj_filtra","🛢️ Vaj/Filtra"]].map(([t,lb2])=>(
+                        <button key={t} onClick={()=>chDocType(t)} style={{
+                          border:"1px solid "+(selDocTypes.includes(t)?"#1d4ed8":"#e2e8f0"),borderRadius:20,padding:"5px 10px",
+                          fontSize:11,fontWeight:700,cursor:"pointer",
+                          background:selDocTypes.includes(t)?"#eff6ff":"#fff",color:selDocTypes.includes(t)?"#1d4ed8":"#64748b"
+                        }}>{lb2}</button>
+                      ))}
+                    </div>
+                    {selDocTypes.length>0&&<button onClick={()=>{setSelDocTypes([]);setShown(false);}} style={{border:"none",background:"none",color:"#dc2626",fontSize:11,fontWeight:600,cursor:"pointer",marginTop:5,padding:0}}>✕ Pastro llojet</button>}
+                  </div>
+                )}
+                <button onClick={()=>setShown(true)} style={{...PB,fontSize:13,padding:"9px 0",width:"100%"}}>🔍 Shfaq Raportin</button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* CONTENT */}
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+          <h2 style={{margin:0,fontSize:17,fontWeight:700,color:"#0f172a"}}>📈 Raportet</h2>
+          <div style={{flex:1}}/>
+          {tab!=="docs"&&tab!=="deposits"&&(
+            <div style={{display:"flex",background:"#f1f5f9",borderRadius:9,padding:3}}>
+              {[["summary","📊 Përmbledhje"],["detail","📋 Analitikë"]].map(([v,l])=>(
+                <button key={v} onClick={()=>chView(v)} style={{
+                  border:"none",borderRadius:7,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer",
+                  background:view===v?"#1d4ed8":"transparent",color:view===v?"#fff":"#64748b"
+                }}>{l}</button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {!shown
+          ? <div style={{textAlign:"center",color:"#94a3b8",padding:60,background:"#fff",borderRadius:12,border:"1px dashed #cbd5e1"}}>Zgjidh filtrat anash dhe kliko <strong>"🔍 Shfaq Raportin"</strong> për ta parë.</div>
+          : <>
+              {tab==="cars"&&<CarsReport cars={cars} reses={fReses} exps={fExps} view={view}/>}
+              {tab==="finance"&&<FinanceReport cars={cars} ledger={fLedger} reses={reses} view={view}/>}
+              {tab==="cli"&&<ClientsReport clients={clients} reses={fReses} selClient={selClient} view={view}/>}
+              {tab==="docs"&&<DocsReport cars={cars} services={fSrvs} carSettings={fCarSettings} reses={reses} selTypes={selDocTypes}/>}
+              {tab==="deposits"&&<DepositsReport cars={cars} ledger={fLedger} reses={reses}/>}
+            </>
+        }
+      </div>
+    </div>
+  );
+}
+
+function CarsReport({cars,reses,exps,view}){
+  const carNames=[...new Set(reses.map(r=>r.car_name).concat(exps.map(e=>e.car_name)).concat(cars.map(c=>c.name)))].filter(Boolean);
   function carStats(cn){
-    const paid=reses.filter(r=>r.car_name===cn&&r.payment_status==="paguar"&&r.status!=="Anuluar");
-    const all=reses.filter(r=>r.car_name===cn&&r.status!=="Anuluar");
-    const incL=paid.filter(r=>r.currency==="ALL").reduce((s,r)=>s+Number(r.total_price),0);
-    const incE=paid.filter(r=>r.currency==="EUR").reduce((s,r)=>s+Number(r.total_price),0);
+    const all=reses.filter(r=>r.car_name===cn);
+    const incL=all.filter(r=>r.currency==="ALL").reduce((s,r)=>s+Number(r.amount_paid||0),0);
+    const incE=all.filter(r=>r.currency==="EUR").reduce((s,r)=>s+Number(r.amount_paid||0),0);
     const expL=exps.filter(e=>e.car_name===cn&&e.currency==="ALL").reduce((s,e)=>s+Number(e.amount),0);
     const expE=exps.filter(e=>e.car_name===cn&&e.currency==="EUR").reduce((s,e)=>s+Number(e.amount),0);
     const totalDays=all.reduce((s,r)=>s+diffDays(r.date_from,r.date_to),0);
     const kmList=all.filter(r=>r.km_out&&r.km_in).map(r=>Number(r.km_in)-Number(r.km_out));
     const totalKm=kmList.reduce((s,k)=>s+k,0);
-    return {paid:paid.length,total:all.length,incL,incE,expL,expE,totalDays,totalKm,balL:incL-expL,balE:incE-expE};
+    const paidFull=all.filter(r=>r.payment_status==="paguar").length;
+    return {paid:paidFull,total:all.length,incL,incE,expL,expE,totalDays,totalKm,balL:incL-expL,balE:incE-expE};
+  }
+
+  if(view==="detail"){
+    const sorted=[...reses].sort((a,b)=>(b.date_from||"").localeCompare(a.date_from||""));
+    return (
+      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,overflow:"hidden"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <thead><tr style={{background:"#f8fafc"}}>
+            {["Makina","Klienti","Nga","Deri","Çmimi","Paguar","Detyrim","Status"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:11,color:"#64748b",fontWeight:700,borderBottom:"2px solid #e2e8f0"}}>{h}</th>)}
+          </tr></thead>
+          <tbody>
+            {sorted.map(r=>{
+              const debt=Number(r.total_price||0)-Number(r.amount_paid||0);
+              return (
+                <tr key={r.id} style={{borderBottom:"1px solid #f1f5f9"}}>
+                  <td style={{padding:"7px 10px",fontWeight:700}}>{carLabel(r.car_name,cars)}</td>
+                  <td style={{padding:"7px 10px"}}>{r.client_name}</td>
+                  <td style={{padding:"7px 10px"}}>{fmtFull(r.date_from)}</td>
+                  <td style={{padding:"7px 10px"}}>{fmtFull(r.date_to)}</td>
+                  <td style={{padding:"7px 10px",fontWeight:700}}>{fmtM(r.total_price,r.currency)}</td>
+                  <td style={{padding:"7px 10px",color:"#16a34a"}}>{fmtM(r.amount_paid||0,r.currency)}</td>
+                  <td style={{padding:"7px 10px",color:debt>0.01?"#dc2626":"#94a3b8",fontWeight:debt>0.01?700:400}}>{debt>0.01?fmtM(debt,r.currency):"-"}</td>
+                  <td style={{padding:"7px 10px"}}><Badge s={r.status}/></td>
+                </tr>
+              );
+            })}
+            {sorted.length===0&&<tr><td colSpan={8} style={{padding:20,textAlign:"center",color:"#94a3b8"}}>Nuk ka rezervime për këtë filtër.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    );
   }
 
   return (
-    <div style={{padding:14,maxWidth:900,margin:"0 auto"}}>
-      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,flexWrap:"wrap"}}>
-        <h2 style={{margin:0,fontSize:17,fontWeight:700,color:"#0f172a",flex:1}}>📈 Raport Financiar</h2>
-        <select value={selCar} onChange={e=>setSelCar(e.target.value)} style={{padding:"7px 10px",borderRadius:8,border:"1px solid #e2e8f0",fontSize:13,fontFamily:"inherit"}}>
-          <option value="all">Të gjitha makinat</option>
-          {carNames.map(cn=><option key={cn} value={cn}>{cn}</option>)}
-        </select>
-      </div>
-
-      {filtCars.map(cn=>{
+    <div>
+      {carNames.map(cn=>{
         const s=carStats(cn);
+        if(s.total===0&&s.expL===0&&s.expE===0) return null;
         const cc=carColor(cn,carNames);
         const car=cars.find(c=>c.name===cn);
         return (
           <div key={cn} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,marginBottom:16,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,0.05)"}}>
-            {/* Header */}
             <div style={{background:cc.bg,borderBottom:"3px solid "+cc.ac,padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
-              {car?.photo_url
-                ? <img src={car.photo_url} style={{width:48,height:34,objectFit:"cover",borderRadius:7,flexShrink:0}}/>
-                : <div style={{fontSize:28}}>🚗</div>
-              }
+              {car?.photo_url ? <img src={car.photo_url} style={{width:48,height:34,objectFit:"cover",borderRadius:7,flexShrink:0}}/> : <div style={{fontSize:28}}>🚗</div>}
               <div>
-                <div style={{fontWeight:800,fontSize:15,color:cc.tx}}>{cn}</div>
+                <div style={{fontWeight:800,fontSize:15,color:cc.tx}}>{car?.targa||cn}</div>
+                <div style={{fontSize:11,color:cc.tx,opacity:0.6}}>{car?.model||""}</div>
                 <div style={{fontSize:12,color:cc.tx,opacity:0.7}}>{s.total} rezervime · {s.totalDays} ditë · {s.totalKm} km</div>
               </div>
             </div>
-            {/* Stats */}
             <div style={{padding:16}}>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-                {/* LEK */}
                 <div style={{background:"#f8fafc",borderRadius:10,padding:"12px 14px",border:"1px solid #e2e8f0"}}>
                   <div style={{fontSize:10,color:"#64748b",fontWeight:700,letterSpacing:1,marginBottom:8}}>LEKË</div>
                   <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{fontSize:12,color:"#64748b"}}>Të ardhura</span><span style={{fontWeight:700,color:"#1d4ed8",fontSize:13}}>{s.incL.toLocaleString("sq-AL")} L</span></div>
@@ -1593,7 +2125,6 @@ function RptPage({sess,reloadTick}) {
                   <div style={{height:1,background:"#e2e8f0",marginBottom:6}}/>
                   <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:12,fontWeight:700}}>Balanca</span><span style={{fontWeight:800,color:s.balL>=0?"#16a34a":"#dc2626",fontSize:14}}>{s.balL.toLocaleString("sq-AL")} L</span></div>
                 </div>
-                {/* EUR */}
                 <div style={{background:"#f8fafc",borderRadius:10,padding:"12px 14px",border:"1px solid #e2e8f0"}}>
                   <div style={{fontSize:10,color:"#64748b",fontWeight:700,letterSpacing:1,marginBottom:8}}>EURO</div>
                   <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{fontSize:12,color:"#64748b"}}>Të ardhura</span><span style={{fontWeight:700,color:"#1d4ed8",fontSize:13}}>€{s.incE.toFixed(2)}</span></div>
@@ -1602,8 +2133,7 @@ function RptPage({sess,reloadTick}) {
                   <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:12,fontWeight:700}}>Balanca</span><span style={{fontWeight:800,color:s.balE>=0?"#16a34a":"#dc2626",fontSize:14}}>€{s.balE.toFixed(2)}</span></div>
                 </div>
               </div>
-              {/* Mini stats */}
-              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
                 {[["📋",s.total,"Rezervime"],["✅",s.paid,"Paguar"],["🗓",s.totalDays,"Ditë"],["🚗",s.totalKm,"Km total"]].map(([ic,val,lb])=>(
                   <div key={lb} style={{background:"#f8fafc",borderRadius:8,padding:"9px 10px",textAlign:"center",border:"1px solid #e2e8f0"}}>
                     <div style={{fontSize:11,marginBottom:2}}>{ic}</div>
@@ -1612,20 +2142,394 @@ function RptPage({sess,reloadTick}) {
                   </div>
                 ))}
               </div>
-              {/* Recent reservations */}
-              {reses.filter(r=>r.car_name===cn).slice(0,5).map(r=>(
-                <div key={r.id} style={{display:"flex",gap:10,alignItems:"center",padding:"8px 0",borderBottom:"1px solid #f1f5f9"}}>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:13,fontWeight:600,color:"#0f172a"}}>{r.client_name}</div>
-                    <div style={{fontSize:11,color:"#94a3b8"}}>{fmtFull(r.date_from)} → {fmtFull(r.date_to)}{r.km_out&&r.km_in?` · ${Number(r.km_in)-Number(r.km_out)} km`:""}</div>
-                  </div>
-                  <div style={{fontWeight:700,fontSize:13,color:r.payment_status==="paguar"?"#16a34a":"#f59e0b"}}>{fmtM(r.total_price,r.currency)}</div>
-                </div>
-              ))}
             </div>
           </div>
         );
       })}
+      {carNames.every(cn=>{const s=carStats(cn);return s.total===0&&s.expL===0&&s.expE===0;})&&
+        <div style={{textAlign:"center",color:"#94a3b8",padding:48,background:"#fff",borderRadius:12,border:"1px solid #e2e8f0"}}>Nuk ka të dhëna për këtë filtër.</div>
+      }
+    </div>
+  );
+}
+
+function ClientsReport({clients,reses,selClient,view}){
+  function clientStats(name){
+    const cr=reses.filter(r=>r.client_name===name);
+    const fatL=cr.filter(r=>r.currency==="ALL").reduce((s,r)=>s+Number(r.total_price||0),0);
+    const fatE=cr.filter(r=>r.currency==="EUR").reduce((s,r)=>s+Number(r.total_price||0),0);
+    const payL=cr.filter(r=>r.currency==="ALL").reduce((s,r)=>s+Number(r.amount_paid||0),0);
+    const payE=cr.filter(r=>r.currency==="EUR").reduce((s,r)=>s+Number(r.amount_paid||0),0);
+    return {count:cr.length,fatL,fatE,payL,payE,detL:fatL-payL,detE:fatE-payE};
+  }
+
+  // Nje klient i zgjedhur -> shfaq levizjet e tij
+  if(selClient){
+    const cr=[...reses.filter(r=>r.client_name===selClient)].sort((a,b)=>(b.date_from||"").localeCompare(a.date_from||""));
+    const s=clientStats(selClient);
+    const cl=clients.find(c=>c.name===selClient);
+    function doExport(){
+      exportToExcel(cr.map(r=>({
+        Makina:r.car_name,Nga:fmtFull(r.date_from),Deri:fmtFull(r.date_to),
+        Cmimi:r.total_price,Valuta:r.currency,Paguar:r.amount_paid||0,
+        Detyrim:Number(r.total_price||0)-Number(r.amount_paid||0),Status:r.status
+      })),"Klienti_"+selClient.replace(/\s+/g,"_")+".xlsx","Levizjet");
+    }
+    return (
+      <div>
+        <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:16,marginBottom:16}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+            <div style={{width:44,height:44,borderRadius:"50%",background:"linear-gradient(135deg,#1d4ed8,#7c3aed)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:800,fontSize:18}}>{selClient.charAt(0).toUpperCase()}</div>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:800,fontSize:16,color:"#0f172a"}}>{selClient}</div>
+              <div style={{fontSize:12,color:"#64748b"}}>{cl?.phone||""}{cl?.id_card?" · "+cl.id_card:""}</div>
+            </div>
+            <button onClick={doExport} style={{...PB,background:"#059669",fontSize:12,padding:"7px 14px"}}>📥 Excel</button>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+            {[["📋",s.count,"Rezervime"],["💰",s.fatL?s.fatL.toLocaleString("sq-AL")+" L":"€"+s.fatE.toFixed(2),"Faturuar"],["✅",s.payL?s.payL.toLocaleString("sq-AL")+" L":"€"+s.payE.toFixed(2),"Paguar"],["⚠️",(s.detL>0?s.detL.toLocaleString("sq-AL")+" L":s.detE>0?"€"+s.detE.toFixed(2):"0"),"Detyrim"]].map(([ic,val,lb])=>(
+              <div key={lb} style={{background:"#f8fafc",borderRadius:8,padding:"9px 10px",textAlign:"center",border:"1px solid #e2e8f0"}}>
+                <div style={{fontSize:11,marginBottom:2}}>{ic}</div>
+                <div style={{fontWeight:800,fontSize:14,color:lb==="Detyrim"&&(s.detL>0.01||s.detE>0.01)?"#dc2626":"#0f172a"}}>{val}</div>
+                <div style={{fontSize:10,color:"#94a3b8"}}>{lb}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,overflow:"hidden"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+            <thead><tr style={{background:"#f8fafc"}}>
+              {["Makina","Nga","Deri","Çmimi","Paguar","Detyrim","Status"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:11,color:"#64748b",fontWeight:700,borderBottom:"2px solid #e2e8f0"}}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {cr.map(r=>{
+                const debt=Number(r.total_price||0)-Number(r.amount_paid||0);
+                return (
+                  <tr key={r.id} style={{borderBottom:"1px solid #f1f5f9"}}>
+                    <td style={{padding:"7px 10px",fontWeight:700}}>{r.car_name}</td>
+                    <td style={{padding:"7px 10px"}}>{fmtFull(r.date_from)}</td>
+                    <td style={{padding:"7px 10px"}}>{fmtFull(r.date_to)}</td>
+                    <td style={{padding:"7px 10px",fontWeight:700}}>{fmtM(r.total_price,r.currency)}</td>
+                    <td style={{padding:"7px 10px",color:"#16a34a"}}>{fmtM(r.amount_paid||0,r.currency)}</td>
+                    <td style={{padding:"7px 10px",color:debt>0.01?"#dc2626":"#94a3b8",fontWeight:debt>0.01?700:400}}>{debt>0.01?fmtM(debt,r.currency):"-"}</td>
+                    <td style={{padding:"7px 10px"}}><Badge s={r.status}/></td>
+                  </tr>
+                );
+              })}
+              {cr.length===0&&<tr><td colSpan={7} style={{padding:20,textAlign:"center",color:"#94a3b8"}}>Nuk ka rezervime për këtë filtër.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  // Te gjithe klientet -> tabele permbledhese
+  const rows=clients.map(cl=>({cl,s:clientStats(cl.name)})).sort((a,b)=>(b.s.detL+b.s.detE*100)-(a.s.detL+a.s.detE*100));
+  function doExportAll(){
+    exportToExcel(rows.map(({cl,s})=>({
+      Klienti:cl.name,Telefon:cl.phone||"",Rezervime:s.count,
+      "Faturuar (Lek)":s.fatL,"Paguar (Lek)":s.payL,"Detyrim (Lek)":s.detL,
+      "Faturuar (Eur)":s.fatE,"Paguar (Eur)":s.payE,"Detyrim (Eur)":s.detE
+    })),"Klientet_Raport.xlsx","Klientet");
+  }
+
+  if(view==="detail"){
+    const allRes=[...reses].sort((a,b)=>(b.date_from||"").localeCompare(a.date_from||""));
+    function doExportDetail(){
+      exportToExcel(allRes.map(r=>({
+        Klienti:r.client_name,Makina:r.car_name,Nga:fmtFull(r.date_from),Deri:fmtFull(r.date_to),
+        Cmimi:r.total_price,Valuta:r.currency,Paguar:r.amount_paid||0,
+        Detyrim:Number(r.total_price||0)-Number(r.amount_paid||0),Status:r.status
+      })),"Rezervimet_Klienteve.xlsx","Rezervimet");
+    }
+    return (
+      <div>
+        <div style={{display:"flex",justifyContent:"flex-end",marginBottom:10}}>
+          <button onClick={doExportDetail} style={{...PB,background:"#059669",fontSize:12,padding:"7px 14px"}}>📥 Shkarko Excel</button>
+        </div>
+        <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,overflow:"hidden"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+            <thead><tr style={{background:"#f8fafc"}}>
+              {["Klienti","Makina","Nga","Deri","Çmimi","Paguar","Detyrim","Status"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:11,color:"#64748b",fontWeight:700,borderBottom:"2px solid #e2e8f0"}}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {allRes.map(r=>{
+                const debt=Number(r.total_price||0)-Number(r.amount_paid||0);
+                return (
+                  <tr key={r.id} style={{borderBottom:"1px solid #f1f5f9"}}>
+                    <td style={{padding:"7px 10px",fontWeight:700}}>{r.client_name}</td>
+                    <td style={{padding:"7px 10px"}}>{r.car_name}</td>
+                    <td style={{padding:"7px 10px"}}>{fmtFull(r.date_from)}</td>
+                    <td style={{padding:"7px 10px"}}>{fmtFull(r.date_to)}</td>
+                    <td style={{padding:"7px 10px",fontWeight:700}}>{fmtM(r.total_price,r.currency)}</td>
+                    <td style={{padding:"7px 10px",color:"#16a34a"}}>{fmtM(r.amount_paid||0,r.currency)}</td>
+                    <td style={{padding:"7px 10px",color:debt>0.01?"#dc2626":"#94a3b8",fontWeight:debt>0.01?700:400}}>{debt>0.01?fmtM(debt,r.currency):"-"}</td>
+                    <td style={{padding:"7px 10px"}}><Badge s={r.status}/></td>
+                  </tr>
+                );
+              })}
+              {allRes.length===0&&<tr><td colSpan={8} style={{padding:20,textAlign:"center",color:"#94a3b8"}}>Nuk ka rezervime për këtë filtër.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"flex-end",marginBottom:10}}>
+        <button onClick={doExportAll} style={{...PB,background:"#059669",fontSize:12,padding:"7px 14px"}}>📥 Shkarko Excel</button>
+      </div>
+      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,overflow:"hidden"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <thead><tr style={{background:"#f8fafc"}}>
+            {["Klienti","Telefon","Rezervime","Faturuar","Paguar","Detyrim"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:11,color:"#64748b",fontWeight:700,borderBottom:"2px solid #e2e8f0"}}>{h}</th>)}
+          </tr></thead>
+          <tbody>
+            {rows.map(({cl,s})=>(
+              <tr key={cl.id} style={{borderBottom:"1px solid #f1f5f9"}}>
+                <td style={{padding:"7px 10px",fontWeight:700}}>{cl.name}</td>
+                <td style={{padding:"7px 10px",color:"#64748b"}}>{cl.phone||"-"}</td>
+                <td style={{padding:"7px 10px"}}>{s.count}</td>
+                <td style={{padding:"7px 10px"}}>{s.fatL?s.fatL.toLocaleString("sq-AL")+" L":""}{s.fatL&&s.fatE?" · ":""}{s.fatE?"€"+s.fatE.toFixed(2):""}{!s.fatL&&!s.fatE?"-":""}</td>
+                <td style={{padding:"7px 10px",color:"#16a34a"}}>{s.payL?s.payL.toLocaleString("sq-AL")+" L":""}{s.payL&&s.payE?" · ":""}{s.payE?"€"+s.payE.toFixed(2):""}{!s.payL&&!s.payE?"-":""}</td>
+                <td style={{padding:"7px 10px",color:(s.detL>0.01||s.detE>0.01)?"#dc2626":"#94a3b8",fontWeight:(s.detL>0.01||s.detE>0.01)?700:400}}>
+                  {s.detL>0.01?s.detL.toLocaleString("sq-AL")+" L":""}{s.detL>0.01&&s.detE>0.01?" · ":""}{s.detE>0.01?"€"+s.detE.toFixed(2):""}{s.detL<=0.01&&s.detE<=0.01?"-":""}
+                </td>
+              </tr>
+            ))}
+            {rows.length===0&&<tr><td colSpan={6} style={{padding:20,textAlign:"center",color:"#94a3b8"}}>Nuk ka klientë.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function DocsReport({cars,services,carSettings,reses,selTypes}){
+  const TYPE_LB={sigurim:"🛡️ Sigurim",kasko:"🚙 Kasko",kolaudim:"🔍 Kolaudim",taksa:"💼 Taksa",vaj_filtra:"🛢️ Vaj/Filtra"};
+  function daysUntil(dateStr){
+    const d=new Date(dateStr); d.setHours(0,0,0,0);
+    const t=new Date(); t.setHours(0,0,0,0);
+    return Math.round((d-t)/86400000);
+  }
+  function urg(days){
+    if(days<0) return {bg:"#fef2f2",bd:"#fca5a5",tx:"#991b1b",lb:"Skaduar prej "+Math.abs(days)+"d"};
+    if(days<=5) return {bg:"#fef2f2",bd:"#fca5a5",tx:"#991b1b",lb:days+" ditë"};
+    if(days<=15) return {bg:"#fef3c7",bd:"#fde68a",tx:"#92400e",lb:days+" ditë"};
+    if(days<=30) return {bg:"#fef9c3",bd:"#fef08a",tx:"#713f12",lb:days+" ditë"};
+    return {bg:"#f0fdf4",bd:"#bbf7d0",tx:"#166534",lb:days+" ditë"};
+  }
+  function currentKm(cn){
+    const vals=(reses||[]).filter(r=>r.car_name===cn&&r.km_in).map(r=>Number(r.km_in));
+    return vals.length?Math.max(...vals):0;
+  }
+
+  const dateDocs=services
+    .filter(s=>TYPE_LB[s.type]&&s.type!=="vaj_filtra")
+    .map(s=>({...s,kind:"date",daysLeft:daysUntil(s.expiry_date)}));
+
+  const oilDocs=(carSettings||[])
+    .filter(cs=>cs.oil_interval_km&&cs.last_oil_km!==null&&cs.last_oil_km!==undefined)
+    .map(cs=>{
+      const curKm=currentKm(cs.car_name)||Number(cs.last_oil_km);
+      const nextChangeKm=Number(cs.last_oil_km)+Number(cs.oil_interval_km);
+      const kmLeft=nextChangeKm-curKm;
+      return {
+        id:"oil_"+cs.id, car_name:cs.car_name, type:"vaj_filtra",
+        kind:"km", kmLeft, curKm, nextChangeKm,
+        daysLeft:Math.round(kmLeft/500), // ekuivalent per renditje/urgjence te njesuar
+        notes:"Km aktual: "+curKm.toLocaleString()+" · Ndërrimi te: "+nextChangeKm.toLocaleString()+" km"
+      };
+    });
+
+  const docs=[...dateDocs,...oilDocs]
+    .filter(s=>!selTypes||selTypes.length===0||selTypes.includes(s.type))
+    .sort((a,b)=>a.daysLeft-b.daysLeft);
+
+  function doExport(){
+    exportToExcel(docs.map(s=>({
+      Makina:carLabel(s.car_name,cars),Lloji:TYPE_LB[s.type],
+      "Data e Skadimit / Km":s.kind==="date"?fmtFull(s.expiry_date):(s.nextChangeKm.toLocaleString()+" km"),
+      Status:s.kind==="date"?(s.daysLeft<0?"Skaduar":s.daysLeft+" ditë"):(s.kmLeft<0?"Kaluar "+Math.abs(s.kmLeft).toLocaleString()+" km":s.kmLeft.toLocaleString()+" km mbetur"),
+      Shenime:s.notes||""
+    })),"Skadimet_Dokumenteve.xlsx","Skadimet");
+  }
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"flex-end",marginBottom:10}}>
+        <button onClick={doExport} style={{...PB,background:"#059669",fontSize:12,padding:"7px 14px"}}>📥 Shkarko Excel</button>
+      </div>
+      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,overflow:"hidden"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <thead><tr style={{background:"#f8fafc"}}>
+            {["Makina","Lloji","Data e Skadimit / Km","Gjendja","Shënime"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:11,color:"#64748b",fontWeight:700,borderBottom:"2px solid #e2e8f0"}}>{h}</th>)}
+          </tr></thead>
+          <tbody>
+            {docs.map(s=>{
+              const u=urg(s.daysLeft);
+              const gjendja=s.kind==="date"
+                ? u.lb
+                : (s.kmLeft<0?("kaluar "+Math.abs(s.kmLeft).toLocaleString()+" km"):(s.kmLeft.toLocaleString()+" km mbetur"));
+              return (
+                <tr key={s.id} style={{borderBottom:"1px solid #f1f5f9"}}>
+                  <td style={{padding:"7px 10px",fontWeight:700}}>{carLabel(s.car_name,cars)}</td>
+                  <td style={{padding:"7px 10px"}}>{TYPE_LB[s.type]}</td>
+                  <td style={{padding:"7px 10px"}}>{s.kind==="date"?fmtFull(s.expiry_date):(s.nextChangeKm.toLocaleString()+" km")}</td>
+                  <td style={{padding:"7px 10px"}}><span style={{padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:700,background:u.bg,color:u.tx,border:"1px solid "+u.bd}}>{gjendja}</span></td>
+                  <td style={{padding:"7px 10px",color:"#64748b"}}>{s.notes||"-"}</td>
+                </tr>
+              );
+            })}
+            {docs.length===0&&<tr><td colSpan={5} style={{padding:20,textAlign:"center",color:"#94a3b8"}}>Nuk ka dokumente për këtë filtër.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function DepositsReport({cars,ledger,reses}){
+  const resById={}; reses.forEach(r=>{resById[r.id]=r;});
+  const depTx=ledger.filter(l=>l.type==="deposit_in"||l.type==="deposit_out");
+  const groups={};
+  depTx.forEach(l=>{
+    const rid=l.reference_id;
+    if(!rid) return;
+    if(!groups[rid]) groups[rid]={reservation:resById[rid],held:0,totalTaken:0,currency:l.currency,taken:null,returned:null};
+    groups[rid].held += Number(l.amount);
+    if(l.type==="deposit_in"){
+      groups[rid].totalTaken += Number(l.amount);
+      if(!groups[rid].taken||l.created_at<groups[rid].taken) groups[rid].taken=l.created_at;
+    }
+    if(l.type==="deposit_out") groups[rid].returned=l.created_at;
+  });
+  const rows=Object.values(groups).filter(g=>g.reservation).sort((a,b)=>(b.taken||"").localeCompare(a.taken||""));
+
+  function doExport(){
+    exportToExcel(rows.map(g=>({
+      Klienti:g.reservation.client_name,Makina:carLabel(g.reservation.car_name,cars),
+      Shuma:g.totalTaken,
+      Valuta:g.currency,
+      "Marrë më":g.taken?fmtFull(g.taken.slice(0,10)):"",
+      "Kthyer më":g.returned?fmtFull(g.returned.slice(0,10)):"",
+      Status:g.held>0.01?"Mbajtur":"Kthyer"
+    })),"Depozitat.xlsx","Depozitat");
+  }
+
+  const totalHeld={};
+  rows.forEach(g=>{ if(g.held>0.01){ totalHeld[g.currency]=(totalHeld[g.currency]||0)+g.held; } });
+
+  return (
+    <div>
+      <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+        {Object.entries(totalHeld).map(([cur,amt])=>(
+          <div key={cur} style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:10,padding:"10px 16px"}}>
+            <div style={{fontSize:10,color:"#1e40af",fontWeight:700}}>TOTALI I MBAJTUR ({cur})</div>
+            <div style={{fontSize:18,fontWeight:800,color:"#1e40af"}}>{fmtM(amt,cur)}</div>
+          </div>
+        ))}
+        <div style={{flex:1}}/>
+        <button onClick={doExport} style={{...PB,background:"#059669",fontSize:12,padding:"7px 14px"}}>📥 Shkarko Excel</button>
+      </div>
+      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,overflow:"hidden"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <thead><tr style={{background:"#f8fafc"}}>
+            {["Klienti","Makina","Shuma","Marrë më","Kthyer më","Status"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:11,color:"#64748b",fontWeight:700,borderBottom:"2px solid #e2e8f0"}}>{h}</th>)}
+          </tr></thead>
+          <tbody>
+            {rows.map((g,i)=>{
+              const isHeld=g.held>0.01;
+              return (
+                <tr key={i} style={{borderBottom:"1px solid #f1f5f9"}}>
+                  <td style={{padding:"7px 10px",fontWeight:700}}>{g.reservation.client_name}</td>
+                  <td style={{padding:"7px 10px"}}>{carLabel(g.reservation.car_name,cars)}</td>
+                  <td style={{padding:"7px 10px",fontWeight:700}}>{fmtM(g.totalTaken,g.currency)}</td>
+                  <td style={{padding:"7px 10px"}}>{g.taken?fmtFull(g.taken.slice(0,10)):"-"}</td>
+                  <td style={{padding:"7px 10px"}}>{g.returned?fmtFull(g.returned.slice(0,10)):"-"}</td>
+                  <td style={{padding:"7px 10px"}}>
+                    <span style={{padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:700,background:isHeld?"#eff6ff":"#f0fdf4",color:isHeld?"#1e40af":"#166534",border:"1px solid "+(isHeld?"#bfdbfe":"#bbf7d0")}}>
+                      {isHeld?"🔒 Mbajtur":"✅ Kthyer"}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+            {rows.length===0&&<tr><td colSpan={6} style={{padding:20,textAlign:"center",color:"#94a3b8"}}>Nuk ka depozita për këtë filtër.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function FinanceReport({cars,ledger,reses,view}){
+  const TYPE_LB={payment:"💵 Pagesë",manual_in:"➕ Hyrje Manuale",expense:"📤 Shpenzim",manual_out:"➖ Dalje Manuale",transfer:"🔄 Transfertë",deposit_in:"🔒 Depozitë Marrë",deposit_out:"↩️ Depozitë Kthyer"};
+  if(view==="detail"){
+    const sorted=[...ledger].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+    return (
+      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,overflow:"hidden"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <thead><tr style={{background:"#f8fafc"}}>
+            {["Data","Lloji","Përshkrimi","Nga","Shuma"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:11,color:"#64748b",fontWeight:700,borderBottom:"2px solid #e2e8f0"}}>{h}</th>)}
+          </tr></thead>
+          <tbody>
+            {sorted.map(l=>(
+              <tr key={l.id} style={{borderBottom:"1px solid #f1f5f9"}}>
+                <td style={{padding:"7px 10px"}}>{fmtFull((l.created_at||"").slice(0,10))}</td>
+                <td style={{padding:"7px 10px"}}>{TYPE_LB[l.type]||l.type}</td>
+                <td style={{padding:"7px 10px",color:"#64748b"}}>{l.description||"-"}</td>
+                <td style={{padding:"7px 10px",color:"#94a3b8"}}>{l.created_by||"-"}</td>
+                <td style={{padding:"7px 10px",fontWeight:700,color:Number(l.amount)>=0?"#16a34a":"#dc2626"}}>{fmtM(Math.abs(l.amount),l.currency)}</td>
+              </tr>
+            ))}
+            {sorted.length===0&&<tr><td colSpan={5} style={{padding:20,textAlign:"center",color:"#94a3b8"}}>Nuk ka lëvizje për këtë filtër.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  function sumBy(type,cur){ return ledger.filter(l=>l.type===type&&l.currency===cur).reduce((s,l)=>s+Number(l.amount),0); }
+  const incL=sumBy("payment","ALL")+sumBy("manual_in","ALL");
+  const incE=sumBy("payment","EUR")+sumBy("manual_in","EUR");
+  const expL=Math.abs(sumBy("expense","ALL")+sumBy("manual_out","ALL"));
+  const expE=Math.abs(sumBy("expense","EUR")+sumBy("manual_out","EUR"));
+
+  return (
+    <div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+        <div style={{background:"#fff",borderRadius:12,padding:"14px 16px",border:"1px solid #e2e8f0"}}>
+          <div style={{fontSize:10,color:"#64748b",fontWeight:700,letterSpacing:1,marginBottom:8}}>LEKË</div>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:13,color:"#64748b"}}>Të ardhura</span><span style={{fontWeight:700,color:"#1d4ed8",fontSize:15}}>{incL.toLocaleString("sq-AL")} L</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:13,color:"#64748b"}}>Shpenzime</span><span style={{fontWeight:700,color:"#dc2626",fontSize:15}}>{expL.toLocaleString("sq-AL")} L</span></div>
+          <div style={{height:1,background:"#e2e8f0",marginBottom:8}}/>
+          <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:13,fontWeight:700}}>Balanca</span><span style={{fontWeight:800,color:incL-expL>=0?"#16a34a":"#dc2626",fontSize:17}}>{(incL-expL).toLocaleString("sq-AL")} L</span></div>
+        </div>
+        <div style={{background:"#fff",borderRadius:12,padding:"14px 16px",border:"1px solid #e2e8f0"}}>
+          <div style={{fontSize:10,color:"#64748b",fontWeight:700,letterSpacing:1,marginBottom:8}}>EURO</div>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:13,color:"#64748b"}}>Të ardhura</span><span style={{fontWeight:700,color:"#1d4ed8",fontSize:15}}>€{incE.toFixed(2)}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:13,color:"#64748b"}}>Shpenzime</span><span style={{fontWeight:700,color:"#dc2626",fontSize:15}}>€{expE.toFixed(2)}</span></div>
+          <div style={{height:1,background:"#e2e8f0",marginBottom:8}}/>
+          <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:13,fontWeight:700}}>Balanca</span><span style={{fontWeight:800,color:incE-expE>=0?"#16a34a":"#dc2626",fontSize:17}}>€{(incE-expE).toFixed(2)}</span></div>
+        </div>
+      </div>
+      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:16}}>
+        <h3 style={{margin:"0 0 10px",fontSize:13,fontWeight:700,color:"#374151"}}>Sipas Llojit</h3>
+        {Object.entries(TYPE_LB).map(([type,label])=>{
+          const l=sumBy(type,"ALL"), e=sumBy(type,"EUR");
+          if(!l&&!e) return null;
+          return (
+            <div key={type} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #f1f5f9",fontSize:13}}>
+              <span style={{color:"#374151"}}>{label}</span>
+              <span style={{fontWeight:700}}>{l?l.toLocaleString("sq-AL")+" L":""}{l&&e?" · ":""}{e?"€"+e.toFixed(2):""}</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1634,105 +2538,192 @@ function RptPage({sess,reloadTick}) {
 function SrvPage({sess,reload,reloadTick,addLog}) {
   const [cars,setCars]=useState([]);
   const [services,setServices]=useState([]);
-  const [carSettings,setCarSettings]=useState([]);
   const [reses,setReses]=useState([]);
+  const [carSettings,setCarSettings]=useState([]);
   const [loading,setLoading]=useState(true);
+  const [err,setErr]=useState("");
   const [selCar,setSelCar]=useState("");
+  const [srch,setSrch]=useState("");
   const [showSrvF,setShowSrvF]=useState(false);
-  const [showSettF,setShowSettF]=useState(false);
   const [editSrv,setEditSrv]=useState(null);
-  const [sf,setSf]=useState({car_name:"",type:"sigurim",expiry_date:"",notes:""});
-  const [csf,setCsf]=useState({car_name:"",oil_interval_km:"10000",last_oil_km:"0",last_oil_date:"",notes:""});
+  const [sf,setSf]=useState({car_name:"",type:"sigurim",expiry_date:"",done_date:"",notes:""});
+  const [showOilF,setShowOilF]=useState(false);
+  const [oilF,setOilF]=useState({last_oil_km:"",oil_interval_km:"15000",last_oil_date:""});
+  const [importingDocs,setImportingDocs]=useState(false);
+  const [importDocsMsg,setImportDocsMsg]=useState("");
+  const docsFileRef=useRef(null);
 
-  const SRV_TYPES={"sigurim":"🛡️ Sigurim","kolaudim":"🔍 Kolaudim","taksa":"💼 Taksa"};
-  const DAYS_WARN=[15,10,5,3,1];
+  const SRV_TYPES={"sigurim":"🛡️ Sigurim","kasko":"🚙 Kasko","kolaudim":"🔍 Kolaudim","taksa":"💼 Taksa"};
+  const DAYS_WARN=[30,15,7,5];
+  const KM_WARN=[2000,1000,500,200];
 
   useEffect(()=>{
-    setLoading(true);
+    setLoading(true); setErr("");
     Promise.all([
       sbAuthGet("cars","order=sort_order.asc",sess.token),
-      sbAuthGet("car_services","order=expiry_date.asc",sess.token),
-      sbAuthGet("car_settings","",sess.token),
-      sbAuthGet("reservations","status=neq.Anuluar",sess.token)
-    ]).then(([c,s,cs,r])=>{
-      setCars(c);setServices(s);setCarSettings(cs);setReses(r);
-      if(!selCar&&c.length>0) setSelCar(c[0].name);
+      sbAuthGet("car_services","order=created_at.desc",sess.token),
+      sbAuthGet("reservations","",sess.token),
+      sbAuthGet("car_settings","",sess.token)
+    ]).then(([c,s,r,cset])=>{
+      const activeCars=c.filter(x=>x.active!==false);
+      setCars(activeCars);setServices(s);setReses(r);setCarSettings(cset);
+      if(!selCar&&activeCars.length>0) setSelCar(activeCars[0].name);
       setLoading(false);
-      // Check notifications
-      checkSrvNotifs(s,cs,r);
-    }).catch(()=>setLoading(false));
+      try { checkSrvNotifs(s,cset,r); } catch(e){ console.error("checkSrvNotifs error:",e); }
+    }).catch(e=>{ setErr(e.message||String(e)); setLoading(false); });
   },[reloadTick,sess.token]);
+
+  function currentKm(cn){
+    const vals=reses.filter(r=>r.car_name===cn&&r.km_in).map(r=>Number(r.km_in));
+    return vals.length?Math.max(...vals):0;
+  }
 
   function checkSrvNotifs(svcs,csets,resesList){
     if(!("Notification" in window)||Notification.permission!=="granted") return;
     const today=new Date(); today.setHours(0,0,0,0);
     const sent=JSON.parse(localStorage.getItem("crm_srv_notifs")||"{}");
-
-    // Service expiry notifications
-    svcs.forEach(s=>{
+    // Njoftime sipas date (Sigurim/Kasko/Kolaudim/Taksa)
+    svcs.filter(s=>SRV_TYPES[s.type]).forEach(s=>{
       const exp=new Date(s.expiry_date); exp.setHours(0,0,0,0);
       const daysLeft=Math.round((exp-today)/86400000);
+      const label=SRV_TYPES[s.type];
       DAYS_WARN.forEach(d=>{
         const key=s.id+"_"+d;
         if(daysLeft===d&&!sent[key]){
-          new Notification("⚠️ "+SRV_TYPES[s.type]+" skadon në "+d+" ditë",{body:s.car_name+" · "+s.expiry_date});
+          new Notification("⚠️ "+label+" skadon në "+d+" ditë",{body:s.car_name+" · "+s.expiry_date});
           sent[key]=true;
         }
       });
+      if(daysLeft<=5){
+        const todayStr=today.toISOString().slice(0,10);
+        const dailyKey=s.id+"_daily_"+todayStr;
+        if(!sent[dailyKey]){
+          const lbl=daysLeft<0?("SKADUAR prej "+Math.abs(daysLeft)+" ditë!"):daysLeft===0?"SKADON SOT!":("mbetën "+daysLeft+" ditë");
+          new Notification("🚨 "+label+" - "+lbl,{body:s.car_name+" · "+s.expiry_date});
+          sent[dailyKey]=true;
+        }
+      }
     });
-
-    // Oil/filter km notifications
-    csets.forEach(cs=>{
-      if(!cs.oil_interval_km||!cs.last_oil_km) return;
-      const maxKm=Number(cs.last_oil_km)+Number(cs.oil_interval_km);
-      // Get latest km from reservations
-      const carReses=resesList.filter(r=>r.car_name===cs.car_name&&r.km_in);
-      if(!carReses.length) return;
-      const latestKm=Math.max(...carReses.map(r=>Number(r.km_in)));
-      const kmLeft=maxKm-latestKm;
-      [2000,1000,500,100].forEach(km=>{
-        const key=cs.car_name+"_oil_"+Math.floor(latestKm/100)+"_"+km;
-        if(kmLeft>0&&kmLeft<=km&&!sent[key]){
-          new Notification("🔧 Ndërrimi vaj/filtra brenda "+km+"km",{body:cs.car_name+" · Km aktual: "+latestKm+" · Ndërrimi: "+maxKm+"km"});
+    // Njoftime KM per Vaj/Filtra
+    csets.forEach(cset=>{
+      if(!cset.oil_interval_km||cset.last_oil_km===null||cset.last_oil_km===undefined) return;
+      const vals=resesList.filter(r=>r.car_name===cset.car_name&&r.km_in).map(r=>Number(r.km_in));
+      const curKm=vals.length?Math.max(...vals):Number(cset.last_oil_km);
+      const nextChangeKm=Number(cset.last_oil_km)+Number(cset.oil_interval_km);
+      const kmLeft=nextChangeKm-curKm;
+      KM_WARN.forEach(k=>{
+        const key=cset.car_name+"_oilkm_"+k;
+        if(kmLeft<=k&&kmLeft>k-500&&!sent[key]){
+          new Notification("🛢️ Vaj/Filtra afër ndërrimit — "+cset.car_name,{body:"Edhe ~"+Math.max(0,kmLeft).toLocaleString()+" km deri ndërrimit"});
           sent[key]=true;
         }
-        if(kmLeft<=0&&!sent[cs.car_name+"_oil_overdue"]){
-          new Notification("🚨 Ndërrimi vaj/filtra I KALUAR!",{body:cs.car_name+" · "+Math.abs(kmLeft)+"km pa ndërruar"});
-          sent[cs.car_name+"_oil_overdue"]=true;
-        }
       });
+      if(kmLeft<=200){
+        const todayStr=today.toISOString().slice(0,10);
+        const dailyKey=cset.car_name+"_oilkm_daily_"+todayStr;
+        if(!sent[dailyKey]){
+          const lbl=kmLeft<0?("KALUAR me "+Math.abs(kmLeft).toLocaleString()+" km!"):("edhe "+kmLeft.toLocaleString()+" km");
+          new Notification("🚨 Vaj/Filtra — "+cset.car_name+" — "+lbl,{body:"Km aktual: "+curKm.toLocaleString()+" · Ndërrimi te: "+nextChangeKm.toLocaleString()});
+          sent[dailyKey]=true;
+        }
+      }
     });
     localStorage.setItem("crm_srv_notifs",JSON.stringify(sent));
   }
 
   async function saveSrv(){
-    if(!sf.car_name||!sf.expiry_date) return;
-    if(editSrv){
-      await sbAuthPatch("car_services",editSrv,sf,sess.token);
-      addLog("Ndrysho Servis",sf.car_name+" - "+sf.type);
-    } else {
-      await sbAuthPost("car_services",{...sf,created_by:sess.profile?.username},sess.token);
-      addLog("Shto Servis",sf.car_name+" - "+sf.type);
+    if(!sf.car_name||!sf.expiry_date) { alert("Duhet të zgjedhësh makinën dhe datën."); return; }
+    try {
+      const body={...sf,done_date:sf.done_date||null};
+      if(editSrv){
+        await sbAuthPatch("car_services",editSrv,body,sess.token);
+        addLog("Ndrysho Servis",sf.car_name+" - "+sf.type);
+      } else {
+        await sbAuthPost("car_services",{...body,created_by:sess.profile?.username},sess.token);
+        addLog("Shto Servis",sf.car_name+" - "+sf.type);
+      }
+      reload(); setShowSrvF(false); setEditSrv(null);
+      setSf({car_name:selCar||"",type:"sigurim",expiry_date:"",done_date:"",notes:""});
+    } catch(e){
+      alert("Gabim: "+e.message);
     }
-    reload(); setShowSrvF(false); setEditSrv(null);
-    setSf({car_name:selCar||"",type:"sigurim",expiry_date:"",notes:""});
   }
   async function delSrv(id){
     await sbAuthDelete("car_services",id,sess.token);
     addLog("Fshi Servis","");
     reload();
   }
-  async function saveCarSett(){
-    if(!csf.car_name) return;
-    const existing=carSettings.find(s=>s.car_name===csf.car_name);
-    const body={car_name:csf.car_name,oil_interval_km:Number(csf.oil_interval_km),last_oil_km:Number(csf.last_oil_km),last_oil_date:csf.last_oil_date||null,notes:csf.notes};
-    if(existing){
-      await sbAuthPatch("car_settings",existing.id,body,sess.token);
-    } else {
-      await sbAuthPost("car_settings",body,sess.token);
+  async function saveOilSettings(){
+    if(!oilF.last_oil_km||!oilF.oil_interval_km){ alert("Duhet të vendosësh km e ndërrimit dhe intervalin."); return; }
+    try {
+      const existing=carSettings.find(cs=>cs.car_name===selCar);
+      const body={car_name:selCar,last_oil_km:Number(oilF.last_oil_km),oil_interval_km:Number(oilF.oil_interval_km),last_oil_date:oilF.last_oil_date||null};
+      if(existing){
+        await sbAuthPatch("car_settings",existing.id,body,sess.token);
+      } else {
+        await sbAuthPost("car_settings",body,sess.token);
+      }
+      addLog("Vendos Vaj/Filtra (Km)",selCar+" @ "+oilF.last_oil_km+" km");
+      reload(); setShowOilF(false);
+    } catch(e){ alert("Gabim: "+e.message); }
+  }
+
+  const DOC_COLS=[["sigurim","Sigurim - Skadimi"],["kasko","Kasko - Skadimi"],["kolaudim","Kolaudim - Skadimi"],["taksa","Taksa - Skadimi"]];
+
+  function downloadDocsTemplate(){
+    const headers=["Targa","Modeli",...DOC_COLS.map(([,lb])=>lb)];
+    const rows=cars.map(c=>[c.targa||"",c.model||c.name||"","","","",""]);
+    const ws=XLSX.utils.aoa_to_sheet([headers,...rows]);
+    ws["!cols"]=[{wch:14},{wch:20},{wch:16},{wch:16},{wch:16},{wch:16}];
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,"Skadimet");
+    XLSX.writeFile(wb,"Template_Skadimet.xlsx");
+  }
+
+  function parseCellDate(val){
+    if(!val) return null;
+    if(val instanceof Date) return val.getFullYear()+"-"+String(val.getMonth()+1).padStart(2,"0")+"-"+String(val.getDate()).padStart(2,"0");
+    const s=String(val).trim();
+    if(!s) return null;
+    const m=s.match(/^(\d{1,2})[\/\.\-](\d{1,2})[\/\.\-](\d{4})$/);
+    if(m) return m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0");
+    if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    return null;
+  }
+
+  async function importDocsFromExcel(file){
+    if(!file) return;
+    setImportingDocs(true); setImportDocsMsg("");
+    try {
+      const buf=await file.arrayBuffer();
+      const wb=XLSX.read(buf,{type:"array",cellDates:true});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+      let updated=0, skippedCar=0, skippedDate=0;
+      for(const row of rows){
+        const targa=String(row["Targa"]||"").trim();
+        if(!targa){ skippedCar++; continue; }
+        const car=cars.find(c=>(c.targa||"").toLowerCase()===targa.toLowerCase());
+        if(!car){ skippedCar++; continue; }
+        for(const [type,label] of DOC_COLS){
+          const raw=row[label];
+          const iso=parseCellDate(raw);
+          if(!iso){ if(raw) skippedDate++; continue; }
+          // fshi ekzistueset per kete makine+lloj, pastaj shto te ren
+          const existing=services.filter(s=>s.car_name===car.name&&s.type===type);
+          for(const ex of existing) await sbAuthDelete("car_services",ex.id,sess.token);
+          await sbAuthPost("car_services",{car_name:car.name,type,expiry_date:iso,created_by:sess.profile?.username},sess.token);
+          updated++;
+        }
+      }
+      addLog("Import Skadimesh (Excel)",updated+" dokumente");
+      setImportDocsMsg("✅ U përditësuan "+updated+" dokumente"+(skippedCar?" · "+skippedCar+" rreshta pa targë të njohur":"")+(skippedDate?" · "+skippedDate+" data të pavlefshme u anashkaluan":""));
+      reload();
+    } catch(e){
+      setImportDocsMsg("❌ Gabim: "+e.message);
     }
-    addLog("Cilësime Makine",csf.car_name);
-    reload(); setShowSettF(false);
+    setImportingDocs(false);
+    if(docsFileRef.current) docsFileRef.current.value="";
   }
 
   function daysUntil(dateStr){
@@ -1742,124 +2733,144 @@ function SrvPage({sess,reload,reloadTick,addLog}) {
   }
   function urgencyColor(days){
     if(days<0)  return {bg:"#fef2f2",bd:"#fca5a5",tx:"#991b1b",label:"Skaduar"};
-    if(days<=3) return {bg:"#fef2f2",bd:"#fca5a5",tx:"#991b1b",label:days+"d"};
-    if(days<=10) return {bg:"#fef3c7",bd:"#fde68a",tx:"#92400e",label:days+"d"};
-    if(days<=15) return {bg:"#fef9c3",bd:"#fef08a",tx:"#713f12",label:days+"d"};
+    if(days<=5) return {bg:"#fef2f2",bd:"#fca5a5",tx:"#991b1b",label:days+"d"};
+    if(days<=15) return {bg:"#fef3c7",bd:"#fde68a",tx:"#92400e",label:days+"d"};
+    if(days<=30) return {bg:"#fef9c3",bd:"#fef08a",tx:"#713f12",label:days+"d"};
     return {bg:"#f0fdf4",bd:"#bbf7d0",tx:"#166534",label:days+"d"};
   }
 
   const carNames=cars.map(c=>c.name);
   if(loading) return <Spin/>;
+  if(err) return <Err msg={err} onRetry={()=>{setErr("");reload();}}/>;
 
-  // Latest km per car from reservations
-  function latestKm(carName){
-    const cr=reses.filter(r=>r.car_name===carName&&r.km_in);
-    if(!cr.length) return null;
-    return Math.max(...cr.map(r=>Number(r.km_in)));
+  // Statusi më urgjent për një makinë (për pamjen e flotës)
+  // Statusi më urgjent për një makinë (për pamjen e flotës) - dite deri skadim minimale, ose km-ekuivalent per vaj
+  function worstStatus(cn){
+    const docs=services.filter(s=>s.car_name===cn&&SRV_TYPES[s.type]);
+    let worst=null;
+    docs.forEach(s=>{ const d=daysUntil(s.expiry_date); if(worst===null||d<worst) worst=d; });
+    const cset=carSettings.find(cs=>cs.car_name===cn);
+    if(cset&&cset.oil_interval_km&&cset.last_oil_km!==null&&cset.last_oil_km!==undefined){
+      const curKm=currentKm(cn)||Number(cset.last_oil_km);
+      const kmLeft=(Number(cset.last_oil_km)+Number(cset.oil_interval_km))-curKm;
+      // konverto km ne "ditë-ekuivalente" per krahasim urgjence (500km ~ 1 "ditë" urgjence)
+      const kmAsDays=Math.round(kmLeft/500);
+      if(worst===null||kmAsDays<worst) worst=kmAsDays;
+    }
+    return worst;
   }
 
+  const filteredCars=cars.filter(c=>!srch||(c.targa||"").toLowerCase().includes(srch.toLowerCase())||(c.model||c.name||"").toLowerCase().includes(srch.toLowerCase()));
+  const selDocs=services.filter(s=>s.car_name===selCar&&SRV_TYPES[s.type]);
+  const selOilSetting=carSettings.find(cs=>cs.car_name===selCar);
+  const selCurKm=selCar?currentKm(selCar):0;
+
   return (
-    <div style={{padding:14,maxWidth:900,margin:"0 auto"}}>
-      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+    <div style={{padding:14,maxWidth:1000,margin:"0 auto"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
         <h2 style={{margin:0,fontSize:17,fontWeight:700,color:"#0f172a",flex:1}}>🔧 Servis & Dokumenta</h2>
-        <select value={selCar} onChange={e=>setSelCar(e.target.value)} style={{padding:"7px 10px",borderRadius:8,border:"1px solid #e2e8f0",fontSize:13,fontFamily:"inherit"}}>
-          {carNames.map(cn=><option key={cn} value={cn}>{cn}</option>)}
-        </select>
-        <button onClick={()=>{setSf({car_name:selCar,type:"sigurim",expiry_date:"",notes:""});setEditSrv(null);setShowSrvF(true)}} style={PB}>+ Shto Dokument</button>
-        <button onClick={()=>{const s=carSettings.find(cs=>cs.car_name===selCar); setCsf({car_name:selCar,oil_interval_km:s?.oil_interval_km||10000,last_oil_km:s?.last_oil_km||0,last_oil_date:s?.last_oil_date||"",notes:s?.notes||""});setShowSettF(true)}} style={{...PB,background:"#7c3aed"}}>⚙️ Vaj/Filtra</button>
+        <span style={{fontSize:12,color:"#94a3b8"}}>{cars.length} makina</span>
       </div>
+      <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+        <button onClick={downloadDocsTemplate} style={{...PB,background:"#475569",fontSize:12,padding:"7px 12px"}}>📄 Shkarko Template Skadimesh</button>
+        <label style={{...PB,background:"#059669",cursor:"pointer",display:"inline-flex",alignItems:"center",gap:6,fontSize:12,padding:"7px 12px"}}>
+          {importingDocs?"⏳ Duke importuar...":"📥 Importo Skadimet nga Excel"}
+          <input ref={docsFileRef} type="file" accept=".xlsx,.xls" onChange={e=>importDocsFromExcel(e.target.files[0])} style={{display:"none"}} disabled={importingDocs}/>
+        </label>
+      </div>
+      {importDocsMsg&&<div style={{marginBottom:14,padding:"8px 12px",borderRadius:8,fontSize:12,fontWeight:600,background:importDocsMsg.startsWith("✅")?"#dcfce7":"#fee2e2",color:importDocsMsg.startsWith("✅")?"#166534":"#991b1b"}}>{importDocsMsg}</div>}
 
-      {/* Alerts - expiring soon */}
-      {services.filter(s=>daysUntil(s.expiry_date)<=15).map(s=>{
-        const urg=urgencyColor(daysUntil(s.expiry_date));
-        return (
-          <div key={s.id+"_alert"} style={{background:urg.bg,border:"1px solid "+urg.bd,borderRadius:10,padding:"10px 14px",marginBottom:8,display:"flex",gap:10,alignItems:"center"}}>
-            <span style={{fontSize:18}}>⚠️</span>
-            <div style={{flex:1}}>
-              <div style={{fontWeight:700,fontSize:13,color:urg.tx}}>{SRV_TYPES[s.type]} — {s.car_name}</div>
-              <div style={{fontSize:12,color:urg.tx,opacity:0.8}}>Skadon: {fmtFull(s.expiry_date)} · {urg.label==="Skaduar"?"SKADUAR!":urg.label+" ditë"}</div>
-            </div>
-          </div>
-        );
-      })}
+      <input value={srch} onChange={e=>setSrch(e.target.value)} placeholder="🔍 Kërko makinën me targë ose model..." style={{...FL,marginBottom:14}}/>
 
-      {/* Oil km alerts */}
-      {carNames.filter(cn=>selCar==="all"||cn===selCar).map(cn=>{
-        const cs=carSettings.find(s=>s.car_name===cn);
-        if(!cs||!cs.oil_interval_km) return null;
-        const lkm=latestKm(cn);
-        if(!lkm) return null;
-        const maxKm=Number(cs.last_oil_km)+Number(cs.oil_interval_km);
-        const kmLeft=maxKm-lkm;
-        if(kmLeft>2000) return null;
-        const isOver=kmLeft<=0;
-        return (
-          <div key={cn+"_oil"} style={{background:isOver?"#fef2f2":"#fef3c7",border:"1px solid "+(isOver?"#fca5a5":"#fde68a"),borderRadius:10,padding:"10px 14px",marginBottom:8,display:"flex",gap:10,alignItems:"center"}}>
-            <span style={{fontSize:18}}>🔧</span>
-            <div style={{flex:1}}>
-              <div style={{fontWeight:700,fontSize:13,color:isOver?"#991b1b":"#92400e"}}>Vaj/Filtra — {cn}</div>
-              <div style={{fontSize:12,color:isOver?"#991b1b":"#92400e",opacity:0.9}}>
-                {isOver?`KALUAR ${Math.abs(kmLeft)} km pa ndërruar!`:`${kmLeft} km deri ndërrimit`} · Km aktual: {lkm.toLocaleString()} · Ndërrimi: {maxKm.toLocaleString()} km
+      {/* Pamja e flotës — kush ka nevojë për vëmendje */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(110px,1fr))",gap:8,marginBottom:18}}>
+        {filteredCars.map(car=>{
+          const worst=worstStatus(car.name);
+          const urg=worst===null?{bg:"#f8fafc",bd:"#e2e8f0",tx:"#94a3b8"}:urgencyColor(worst);
+          const sel=selCar===car.name;
+          return (
+            <div key={car.id} onClick={()=>setSelCar(car.name)} style={{
+              cursor:"pointer",background:urg.bg,border:"2px solid "+(sel?"#1d4ed8":urg.bd),borderRadius:10,
+              padding:"8px 6px",textAlign:"center",boxShadow:sel?"0 0 0 2px #bfdbfe":"none"
+            }}>
+              <div style={{fontSize:11,fontWeight:800,color:urg.tx}}>{car.targa||car.name}</div>
+              <div style={{fontSize:9,color:urg.tx,opacity:0.8,marginTop:2}}>
+                {worst===null?"pa dokumente":worst<0?"SKADUAR":worst+" ditë"}
               </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
 
-      {/* Services list per car */}
-      {(selCar?[selCar]:carNames).map(cn=>{
-        const carSrvs=services.filter(s=>s.car_name===cn);
-        const cs=carSettings.find(s=>s.car_name===cn);
-        const lkm=latestKm(cn);
-        const car=cars.find(c=>c.name===cn);
-        const cc=carColor(cn,carNames);
-        return (
-          <div key={cn} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,marginBottom:14,overflow:"hidden"}}>
-            <div style={{background:cc.bg,borderBottom:"2px solid "+cc.ac,padding:"10px 14px",display:"flex",alignItems:"center",gap:10}}>
-              {car?.photo_url?<img src={car.photo_url} style={{width:40,height:28,objectFit:"cover",borderRadius:5}}/>:<span style={{fontSize:20}}>🚗</span>}
-              <span style={{fontWeight:800,fontSize:14,color:cc.tx,flex:1}}>{cn}</span>
-              {cs&&lkm&&<span style={{fontSize:11,color:cc.tx,opacity:0.8}}>Km: {lkm.toLocaleString()} · Vaj: {(Number(cs.last_oil_km)+Number(cs.oil_interval_km)).toLocaleString()} km</span>}
-            </div>
-            <div style={{padding:12}}>
-              {Object.entries(SRV_TYPES).map(([type,label])=>{
-                const srv=carSrvs.find(s=>s.type===type);
-                const days=srv?daysUntil(srv.expiry_date):null;
-                const urg=srv?urgencyColor(days):{bg:"#f8fafc",bd:"#e2e8f0",tx:"#94a3b8"};
-                return (
-                  <div key={type} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid #f1f5f9"}}>
-                    <span style={{fontSize:16,flexShrink:0}}>{label.split(" ")[0]}</span>
-                    <div style={{flex:1}}>
-                      <div style={{fontSize:12,fontWeight:700,color:"#374151"}}>{label.split(" ").slice(1).join(" ")}</div>
-                      {srv?<div style={{fontSize:11,color:"#64748b"}}>{fmtFull(srv.expiry_date)}{srv.notes?" · "+srv.notes:""}</div>:<div style={{fontSize:11,color:"#94a3b8"}}>Nuk është shtuar</div>}
-                    </div>
-                    {srv&&<div style={{padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:700,background:urg.bg,color:urg.tx,border:"1px solid "+urg.bd,flexShrink:0}}>{days<0?"Skaduar":days+"d"}</div>}
-                    <button onClick={()=>{setSf({car_name:cn,type,expiry_date:srv?.expiry_date||"",notes:srv?.notes||""});setEditSrv(srv?.id||null);setShowSrvF(true)}} style={{...IB,fontSize:12}}>{srv?"✏️":"➕"}</button>
-                    {srv&&<button onClick={()=>delSrv(srv.id)} style={{...IB,color:"#dc2626",fontSize:12}}>🗑️</button>}
-                  </div>
-                );
-              })}
-              {/* Oil info */}
-              {cs&&(
-                <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",marginTop:4}}>
-                  <span style={{fontSize:16}}>🛢️</span>
+      {selCar&&(
+        <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,overflow:"hidden"}}>
+          <div style={{background:"#0f172a",padding:"12px 16px",display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontWeight:800,fontSize:15,color:"#fff",flex:1}}>{carLabel(selCar,cars)}</span>
+            <button onClick={()=>{setSf({car_name:selCar,type:"sigurim",expiry_date:"",done_date:"",notes:""});setEditSrv(null);setShowSrvF(true)}} style={{...PB,fontSize:12,padding:"6px 12px"}}>+ Dokument</button>
+          </div>
+
+          <div style={{padding:16}}>
+            {/* Dokumentet: Sigurim / Kasko / Kolaudim / Taksa */}
+            <h3 style={{margin:"0 0 10px",fontSize:13,fontWeight:700,color:"#374151"}}>📄 Dokumentet</h3>
+            {Object.entries(SRV_TYPES).map(([type,label])=>{
+              const srv=selDocs.find(s=>s.type===type);
+              const days=srv?daysUntil(srv.expiry_date):null;
+              const urg=srv?urgencyColor(days):{bg:"#f8fafc",bd:"#e2e8f0",tx:"#94a3b8"};
+              return (
+                <div key={type} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid #f1f5f9"}}>
+                  <span style={{fontSize:16,flexShrink:0}}>{label.split(" ")[0]}</span>
                   <div style={{flex:1}}>
-                    <div style={{fontSize:12,fontWeight:700,color:"#374151"}}>Vaj/Filtra</div>
-                    <div style={{fontSize:11,color:"#64748b"}}>Çdo {Number(cs.oil_interval_km).toLocaleString()} km · Ndërrimi i fundit: {cs.last_oil_km?Number(cs.last_oil_km).toLocaleString()+" km":"-"}{cs.last_oil_date?" ("+fmtFull(cs.last_oil_date)+")":""}</div>
+                    <div style={{fontSize:12,fontWeight:700,color:"#374151"}}>{label.split(" ").slice(1).join(" ")}</div>
+                    {srv?<div style={{fontSize:11,color:"#64748b"}}>Skadon: {fmtFull(srv.expiry_date)}{srv.notes?" · "+srv.notes:""}</div>:<div style={{fontSize:11,color:"#94a3b8"}}>Nuk është shtuar</div>}
                   </div>
-                  {lkm&&cs.last_oil_km&&<div style={{fontSize:11,color:"#64748b",flexShrink:0}}>{Math.max(0,(Number(cs.last_oil_km)+Number(cs.oil_interval_km)-lkm)).toLocaleString()} km mbetur</div>}
+                  {srv&&<div style={{padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:700,background:urg.bg,color:urg.tx,border:"1px solid "+urg.bd,flexShrink:0}}>{days<0?"Skaduar":days+"d"}</div>}
+                  <button onClick={()=>{setSf({car_name:selCar,type,expiry_date:srv?.expiry_date||"",done_date:srv?.done_date||"",notes:srv?.notes||""});setEditSrv(srv?.id||null);setShowSrvF(true)}} style={{...IB,fontSize:12}}>{srv?"✏️":"➕"}</button>
+                  {srv&&<button onClick={()=>delSrv(srv.id)} style={{...IB,color:"#dc2626",fontSize:12}}>🗑️</button>}
                 </div>
-              )}
-            </div>
-          </div>
-        );
-      })}
+              );
+            })}
 
-      {/* Modals */}
+            {/* Vaj/Filtra - bazuar ne KM */}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",margin:"18px 0 10px"}}>
+              <h3 style={{margin:0,fontSize:13,fontWeight:700,color:"#374151"}}>🛢️ Vaj & Filtra (sipas Km)</h3>
+              <button onClick={()=>{setOilF({last_oil_km:selOilSetting?.last_oil_km||"",oil_interval_km:selOilSetting?.oil_interval_km||"15000",last_oil_date:selOilSetting?.last_oil_date||""});setShowOilF(true)}} style={{...IB,fontSize:12}}>{selOilSetting?"✏️ Ndrysho":"➕ Vendos"}</button>
+            </div>
+            {!selOilSetting
+              ? <div style={{fontSize:12,color:"#94a3b8",padding:"10px 0"}}>Nuk është vendosur ende km e ndërrimit të fundit. Kliko "➕ Vendos".</div>
+              : (()=>{
+                  const nextChangeKm=Number(selOilSetting.last_oil_km)+Number(selOilSetting.oil_interval_km);
+                  const kmLeft=nextChangeKm-selCurKm;
+                  const kmAsDays=Math.round(kmLeft/500);
+                  const urg=urgencyColor(kmAsDays);
+                  return (
+                    <div style={{background:urg.bg,border:"1px solid "+urg.bd,borderRadius:10,padding:"12px 14px"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                        <span style={{fontWeight:700,fontSize:13,color:urg.tx}}>{kmLeft<0?"🚨 Ndërrimi ka KALUAR":"🔔 Ndërrimi tjetër"}</span>
+                        <span style={{padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:700,background:"#fff",color:urg.tx,border:"1px solid "+urg.bd}}>
+                          {kmLeft<0?("kaluar "+Math.abs(kmLeft).toLocaleString()+" km"):(kmLeft.toLocaleString()+" km mbetur")}
+                        </span>
+                      </div>
+                      <div style={{fontSize:12,color:urg.tx,lineHeight:1.8}}>
+                        Km aktual (nga marrja e fundit): <strong>{selCurKm.toLocaleString()}</strong><br/>
+                        Ndërrimi i fundit u bë në: <strong>{Number(selOilSetting.last_oil_km).toLocaleString()} km</strong>{selOilSetting.last_oil_date?" ("+fmtFull(selOilSetting.last_oil_date)+")":""}<br/>
+                        Intervali: çdo <strong>{Number(selOilSetting.oil_interval_km).toLocaleString()} km</strong> → ndërrimi tjetër te <strong>{nextChangeKm.toLocaleString()} km</strong>
+                      </div>
+                    </div>
+                  );
+                })()
+            }
+          </div>
+        </div>
+      )}
+
+      {/* Modal Shto/Ndrysho Dokument */}
       {showSrvF&&<Modal title={editSrv?"Ndrysho Dokument":"Shto Dokument"} onClose={()=>{setShowSrvF(false);setEditSrv(null);}}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <Fld label="Makina *"><select value={sf.car_name} onChange={e=>setSf(f=>({...f,car_name:e.target.value}))} style={FL}>{carNames.map(cn=><option key={cn}>{cn}</option>)}</select></Fld>
-          <Fld label="Lloji"><select value={sf.type} onChange={e=>setSf(f=>({...f,type:e.target.value}))} style={FL}>{Object.entries(SRV_TYPES).map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></Fld>
-          <Fld label="Data e Skadimit *" col2><input type="date" value={sf.expiry_date} onChange={e=>setSf(f=>({...f,expiry_date:e.target.value}))} style={FL}/></Fld>
+          <Fld label="Makina *" col2><CarPicker cars={cars} value={sf.car_name} onChange={car=>setSf(f=>({...f,car_name:car.name}))}/></Fld>
+          <Fld label="Lloji"><select value={sf.type} onChange={e=>setSf(f=>({...f,type:e.target.value}))} style={FL}>
+            {Object.entries(SRV_TYPES).map(([v,l])=><option key={v} value={v}>{l}</option>)}
+          </select></Fld>
+          <Fld label="Data e Skadimit *"><DateInput value={sf.expiry_date} onChange={v=>setSf(f=>({...f,expiry_date:v}))}/></Fld>
           <Fld label="Shënime" col2><input value={sf.notes||""} onChange={e=>setSf(f=>({...f,notes:e.target.value}))} style={FL} placeholder="Opsionale..."/></Fld>
         </div>
         <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
@@ -1868,19 +2879,19 @@ function SrvPage({sess,reload,reloadTick,addLog}) {
         </div>
       </Modal>}
 
-      {showSettF&&<Modal title={"⚙️ Vaj/Filtra — "+csf.car_name} onClose={()=>setShowSettF(false)}>
-        <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,padding:"10px 12px",marginBottom:14,fontSize:12,color:"#92400e"}}>
-          🔧 Vendos intervalin e ndërrimit dhe km-in e fundit. Sistemi do njoftojë 2000, 1000, 500, 100 km para.
+      {/* Modal Vaj/Filtra (Km) */}
+      {showOilF&&<Modal title={"🛢️ Vaj & Filtra — "+carLabel(selCar,cars)} onClose={()=>setShowOilF(false)}>
+        <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:8,padding:"10px 12px",marginBottom:14,fontSize:12,color:"#1e40af"}}>
+          ℹ️ Km aktual i kësaj makine (nga marrja e fundit e regjistruar): <strong>{selCurKm.toLocaleString()} km</strong>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <Fld label="Intervali (km) *"><input type="number" value={csf.oil_interval_km} onChange={e=>setCsf(f=>({...f,oil_interval_km:e.target.value}))} style={FL} placeholder="10000"/></Fld>
-          <Fld label="Km i ndërrimit të fundit *"><input type="number" value={csf.last_oil_km} onChange={e=>setCsf(f=>({...f,last_oil_km:e.target.value}))} style={FL} placeholder="45000"/></Fld>
-          <Fld label="Data ndërrimit të fundit" col2><input type="date" value={csf.last_oil_date||""} onChange={e=>setCsf(f=>({...f,last_oil_date:e.target.value}))} style={FL}/></Fld>
-          <Fld label="Shënime" col2><input value={csf.notes||""} onChange={e=>setCsf(f=>({...f,notes:e.target.value}))} style={FL} placeholder="Opsionale..."/></Fld>
+          <Fld label="Km i ndërrimit të fundit *"><input type="number" value={oilF.last_oil_km} onChange={e=>setOilF(f=>({...f,last_oil_km:e.target.value}))} style={FL} placeholder="p.sh. 128000"/></Fld>
+          <Fld label="Intervali (km) *"><input type="number" value={oilF.oil_interval_km} onChange={e=>setOilF(f=>({...f,oil_interval_km:e.target.value}))} style={FL} placeholder="15000"/></Fld>
+          <Fld label="Data e ndërrimit (opsionale)" col2><DateInput value={oilF.last_oil_date} onChange={v=>setOilF(f=>({...f,last_oil_date:v}))}/></Fld>
         </div>
         <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
-          <button onClick={()=>setShowSettF(false)} style={CB}>Anulo</button>
-          <button onClick={saveCarSett} style={PB}>💾 Ruaj</button>
+          <button onClick={()=>setShowOilF(false)} style={CB}>Anulo</button>
+          <button onClick={saveOilSettings} style={PB}>💾 Ruaj</button>
         </div>
       </Modal>}
     </div>
@@ -1915,7 +2926,7 @@ function AudPage({sess,reloadTick}) {
               <div style={{fontSize:14,flexShrink:0}}>{ICONS[e.action]||"📌"}</div>
               <div style={{flex:1}}>
                 <div style={{fontSize:13,fontWeight:600,color:"#0f172a"}}>{e.action}{e.details&&<span style={{fontWeight:400,color:"#64748b"}}> — {e.details}</span>}</div>
-                <div style={{fontSize:11,color:"#94a3b8"}}>👤 <strong>{e.user_name}</strong> · {e.created_at?new Date(e.created_at).toLocaleString("sq-AL"):""}</div>
+                <div style={{fontSize:11,color:"#94a3b8"}}>👤 <strong>{e.user_name}</strong> · {e.created_at?fmtDT(e.created_at):""}</div>
               </div>
             </div>
           ))}
@@ -1934,6 +2945,11 @@ function SetPage({sess,reload,addLog}) {
   const [newCar,setNewCar]=useState("");
   const [showAddUser,setShowAddUser]=useState(false);
   const [uf,setUf]=useState({email:"",password:"",name:"",role:"staff",username:""});
+  const [importing,setImporting]=useState(false);
+  const [importMsg,setImportMsg]=useState("");
+  const [editCar,setEditCar]=useState(null);
+  const [ecf,setEcf]=useState({});
+  const fileRef=useRef(null);
 
   // Branding state from localStorage
   const initBrand = JSON.parse(localStorage.getItem("crm_brand")||"{}");
@@ -1959,16 +2975,98 @@ function SetPage({sess,reload,addLog}) {
       .then(([c,p])=>{setCars(c);setUsers(p);setLoading(false);}).catch(()=>setLoading(false));
   },[sess.token]);
 
-  async function addCar(){
-    const n=newCar.trim();
-    if(!n) return;
+  function downloadTemplate(){
+    const headers=["Modeli i Makinës","Viti i Prodhimit","Nr. Shasisë","Kambio","Karburanti","Targa","Ngjyra"];
+    const example=[
+      ["Volkswagen Golf 7",2018,"WVWZZZAUZJW123456","Automatik","Nafte","AA123BB","E Bardhe"],
+      ["Mercedes-Benz C220",2020,"WDD2050421A123456","Automatik","Nafte","AA456CC","E Zeze"]
+    ];
+    const ws=XLSX.utils.aoa_to_sheet([headers,...example]);
+    ws["!cols"]=[{wch:22},{wch:14},{wch:20},{wch:14},{wch:14},{wch:14},{wch:14}];
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,"Makina");
+    XLSX.writeFile(wb,"Template_Makina.xlsx");
+  }
+  async function importFromExcel(file){
+    if(!file) return;
+    setImporting(true); setImportMsg("");
     try {
-      const [c]=await sbAuthPost("cars",{name:n,sort_order:cars.length+1},sess.token);
-      setCars(cs=>[...cs,c]); addLog("Shto Makinë",n); setNewCar("");
+      const buf=await file.arrayBuffer();
+      const wb=XLSX.read(buf,{type:"array"});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+      let added=0, skipped=0;
+      let sortBase=cars.length;
+      for(const row of rows){
+        const model=String(row["Modeli i Makinës"]||row["Modeli i Makines"]||"").trim();
+        if(!model){ skipped++; continue; }
+        const viti=Number(row["Viti i Prodhimit"])||null;
+        const shasia=String(row["Nr. Shasisë"]||row["Nr. Shasise"]||"").trim();
+        const kambio=String(row["Kambio"]||"").trim();
+        const karburanti=String(row["Karburanti"]||"").trim();
+        const targa=String(row["Targa"]||"").trim();
+        const ngjyra=String(row["Ngjyra"]||"").trim();
+        sortBase++;
+        const uniqueName=targa?(model+" · "+targa):model;
+        const [c]=await sbAuthPost("cars",{
+          name:uniqueName, model, viti_prodhimit:viti, shasia, kambio, karburanti, targa, ngjyra,
+          sort_order:sortBase
+        },sess.token);
+        setCars(cs=>[...cs,c]);
+        added++;
+      }
+      addLog("Import Makina (Excel)",added+" makina");
+      setImportMsg("✅ U shtuan "+added+" makina"+(skipped?" · "+skipped+" rreshta u anashkaluan (pa model)":""));
+    } catch(e){
+      setImportMsg("❌ Gabim: "+e.message);
+    }
+    setImporting(false);
+    if(fileRef.current) fileRef.current.value="";
+  }
+  function openEditCar(car){
+    setEditCar(car.id);
+    setEcf({model:car.model||car.name||"",viti_prodhimit:car.viti_prodhimit||"",shasia:car.shasia||"",kambio:car.kambio||"",karburanti:car.karburanti||"",targa:car.targa||"",ngjyra:car.ngjyra||""});
+  }
+  async function saveCarEdit(){
+    try {
+      const uniqueName=ecf.targa?(ecf.model+" · "+ecf.targa):ecf.model;
+      const oldCar=cars.find(x=>x.id===editCar);
+      const oldName=oldCar?.name;
+      const body={...ecf,name:uniqueName,viti_prodhimit:ecf.viti_prodhimit?Number(ecf.viti_prodhimit):null};
+      const [c]=await sbAuthPatch("cars",editCar,body,sess.token);
+      if(oldName&&oldName!==uniqueName){
+        const filt="car_name=eq."+encodeURIComponent(oldName);
+        await Promise.all([
+          sbAuthPatchWhere("reservations",filt,{car_name:uniqueName},sess.token),
+          sbAuthPatchWhere("expenses",filt,{car_name:uniqueName},sess.token),
+          sbAuthPatchWhere("car_services",filt,{car_name:uniqueName},sess.token),
+          sbAuthPatchWhere("car_settings",filt,{car_name:uniqueName},sess.token),
+        ]);
+      }
+      setCars(cs=>cs.map(x=>x.id===editCar?{...x,...c}:x));
+      addLog("Ndrysho Detaje Makine",uniqueName);
+      setEditCar(null);
     } catch(e){alert(e.message);}
   }
-  async function delCar(id,name){
-    try { await sbAuthDelete("cars",id,sess.token); setCars(cs=>cs.filter(c=>c.id!==id)); addLog("Fshi Makinë",name); } catch(e){alert(e.message);}
+
+  const [newCarTarga,setNewCarTarga]=useState("");
+  async function addCar(){
+    const n=newCar.trim();
+    const t=newCarTarga.trim();
+    if(!n) return;
+    const uniqueName=t?(n+" · "+t):n;
+    try {
+      const [c]=await sbAuthPost("cars",{name:uniqueName,model:n,targa:t,sort_order:cars.length+1},sess.token);
+      setCars(cs=>[...cs,c]); addLog("Shto Makinë",uniqueName); setNewCar(""); setNewCarTarga("");
+    } catch(e){alert(e.message);}
+  }
+  async function toggleCarActive(car){
+    try {
+      const newActive=!(car.active!==false);
+      await sbAuthPatch("cars",car.id,{active:newActive},sess.token);
+      setCars(cs=>cs.map(c=>c.id===car.id?{...c,active:newActive}:c));
+      addLog(newActive?"Aktivizo Makinë":"Pasivizo Makinë",car.name);
+    } catch(e){alert(e.message);}
   }
   async function uploadPhoto(car,file){
     if(!file) return;
@@ -2038,32 +3136,70 @@ function SetPage({sess,reload,addLog}) {
 
       {tab==="cars"&&(
         <div>
-          <div style={{display:"flex",gap:8,marginBottom:16}}>
-            <input value={newCar} onChange={e=>setNewCar(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addCar()} placeholder="p.sh. BMW 320d 2020" style={{...FL,flex:1}}/>
+          <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+            <input value={newCar} onChange={e=>setNewCar(e.target.value)} placeholder="Modeli p.sh. VW Golf 7" style={{...FL,flex:1,minWidth:160}}/>
+            <input value={newCarTarga} onChange={e=>setNewCarTarga(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addCar()} placeholder="Targa p.sh. AA123BB" style={{...FL,flex:1,minWidth:140}}/>
             <button onClick={addCar} style={PB}>+ Shto</button>
+            <button onClick={downloadTemplate} type="button" style={{...PB,background:"#475569"}}>📄 Shkarko Template</button>
+            <label style={{...PB,background:"#059669",cursor:"pointer",display:"inline-flex",alignItems:"center",gap:6}}>
+              {importing?"⏳ Duke importuar...":"📥 Importo nga Excel"}
+              <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={e=>importFromExcel(e.target.files[0])} style={{display:"none"}} disabled={importing}/>
+            </label>
           </div>
+          {importMsg&&<div style={{marginBottom:14,padding:"8px 12px",borderRadius:8,fontSize:12,fontWeight:600,background:importMsg.startsWith("✅")?"#dcfce7":"#fee2e2",color:importMsg.startsWith("✅")?"#166534":"#991b1b"}}>{importMsg}</div>}
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:12}}>
             {cars.map(car=>{
               const cc=carColor(car.name,cars.map(c=>c.name));
-              return <div key={car.id} style={{background:"#fff",borderRadius:14,border:"2px solid "+cc.ac+"44",overflow:"hidden",boxShadow:"0 2px 10px rgba(0,0,0,0.07)"}}>
-                <div style={{position:"relative",height:120,background:car.photo_url?"#000":cc.bg,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+              const isActive=car.active!==false;
+              return <div key={car.id} style={{background:"#fff",borderRadius:14,border:"2px solid "+(isActive?cc.ac+"44":"#e2e8f0"),overflow:"hidden",boxShadow:"0 2px 10px rgba(0,0,0,0.07)",opacity:isActive?1:0.6}}>
+                <div style={{position:"relative",height:130,background:car.photo_url?"#000":cc.bg,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
                   {car.photo_url
-                    ? <img src={car.photo_url} alt={car.name} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                    ? <img src={car.photo_url} alt={car.name} style={{width:"100%",height:"100%",objectFit:"cover",filter:isActive?"none":"grayscale(1)"}}/>
                     : <div style={{fontSize:36,opacity:0.4}}>🚗</div>
                   }
-                  <label style={{position:"absolute",bottom:6,right:6,background:"rgba(0,0,0,0.65)",color:"#fff",borderRadius:7,padding:"4px 8px",fontSize:11,cursor:"pointer",fontWeight:600}}>
+                  {/* Mbulesë e errët poshtë per lexueshmeri te targes */}
+                  <div style={{position:"absolute",left:0,right:0,bottom:0,height:"55%",background:"linear-gradient(to top, rgba(0,0,0,0.75), rgba(0,0,0,0))"}}/>
+                  <div style={{position:"absolute",top:6,left:6,padding:"3px 9px",borderRadius:20,fontSize:10,fontWeight:800,background:isActive?"#dcfce7":"#f1f5f9",color:isActive?"#166534":"#64748b"}}>
+                    {isActive?"● AKTIVE":"○ PASIVE"}
+                  </div>
+                  <button onClick={()=>openEditCar(car)} style={{position:"absolute",top:6,right:6,background:"rgba(0,0,0,0.55)",border:"none",borderRadius:7,width:26,height:26,cursor:"pointer",color:"#fff",fontSize:13}}>✏️</button>
+                  <label style={{position:"absolute",bottom:6,right:6,background:"rgba(0,0,0,0.65)",color:"#fff",borderRadius:7,padding:"4px 8px",fontSize:11,cursor:"pointer",fontWeight:600,zIndex:2}}>
                     📷 Foto
                     <input type="file" accept="image/*" onChange={e=>uploadPhoto(car,e.target.files[0])} style={{display:"none"}}/>
                   </label>
+                  <div style={{position:"absolute",left:10,bottom:6,zIndex:1}}>
+                    <div style={{fontSize:17,fontWeight:900,color:"#fff",lineHeight:1.1,textShadow:"0 1px 4px rgba(0,0,0,0.6)"}}>{car.targa||car.name}</div>
+                    {car.model&&<div style={{fontSize:11,fontWeight:600,color:"rgba(255,255,255,0.85)",textShadow:"0 1px 3px rgba(0,0,0,0.6)"}}>{car.model}</div>}
+                  </div>
                 </div>
-                <div style={{padding:"10px 12px",display:"flex",alignItems:"center",gap:8}}>
-                  <div style={{width:8,height:8,borderRadius:"50%",background:cc.ac,flexShrink:0}}/>
-                  <span style={{flex:1,fontSize:12,fontWeight:700,color:cc.tx,lineHeight:1.3}}>{car.name}</span>
-                  <button onClick={()=>delCar(car.id,car.name)} style={{background:"none",border:"none",cursor:"pointer",color:"#dc2626",fontSize:16,padding:2}}>🗑️</button>
+                <div style={{padding:"10px 12px"}}>
+                  {(car.viti_prodhimit||car.karburanti||car.kambio||car.shasia)&&(
+                    <div style={{fontSize:10,color:"#64748b",lineHeight:1.6,marginBottom:8}}>
+                      {car.viti_prodhimit&&<div>📅 {car.viti_prodhimit}{car.ngjyra?" · "+car.ngjyra:""}</div>}
+                      {(car.kambio||car.karburanti)&&<div>⚙️ {[car.kambio,car.karburanti].filter(Boolean).join(" · ")}</div>}
+                      {car.shasia&&<div>🔩 {car.shasia}</div>}
+                    </div>
+                  )}
+                  <button onClick={()=>toggleCarActive(car)} style={{
+                    width:"100%",padding:"7px 0",borderRadius:8,border:"1px solid "+(isActive?"#fca5a5":"#86efac"),
+                    background:isActive?"#fef2f2":"#f0fdf4",color:isActive?"#991b1b":"#166534",fontSize:12,fontWeight:700,cursor:"pointer"
+                  }}>{isActive?"⏸️ Kalo Pasive":"▶️ Aktivizo"}</button>
                 </div>
               </div>;
             })}
           </div>
+
+          {editCar&&(
+            <Modal title="✏️ Detajet e Makinës" onClose={()=>setEditCar(null)}>
+              {[["model","Modeli"],["viti_prodhimit","Viti i Prodhimit"],["shasia","Nr. Shasisë"],["kambio","Kambio"],["karburanti","Karburanti"],["targa","Targa"],["ngjyra","Ngjyra"]].map(([k,lb])=>(
+                <div key={k} style={{marginBottom:10}}>
+                  <label style={{fontSize:12,fontWeight:700,color:"#374151",display:"block",marginBottom:3}}>{lb}</label>
+                  <input value={ecf[k]||""} onChange={e=>setEcf(f=>({...f,[k]:e.target.value}))} style={FL}/>
+                </div>
+              ))}
+              <button onClick={saveCarEdit} style={{...PB,width:"100%",marginTop:6}}>💾 Ruaj</button>
+            </Modal>
+          )}
         </div>
       )}
 
