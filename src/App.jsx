@@ -934,7 +934,7 @@ function ResPage({sess,reload,reloadTick,addLog}) {
   const [detId,setDetId]=useState(null);
   const [filt,setFilt]=useState("all");
   const [srch,setSrch]=useState("");
-  const empty={car_name:"",car_id:"",client_name:"",client_phone:"",client_id_card:"",date_from:"",date_to:"",pickup_time:"10:00",return_time:"10:00",price_per_day:"",currency:"ALL",total_price:"",status:"Konfirmuar",payment_status:"pritje",notes:""};
+  const empty={car_name:"",car_id:"",client_name:"",client_phone:"",client_id_card:"",date_from:"",date_to:"",pickup_time:"10:00",return_time:"10:00",price_per_day:"",currency:"ALL",total_price:"",prepayment:"",prepayment_method:"cash",status:"Konfirmuar",payment_status:"pritje",notes:""};
   const [form,setForm]=useState(empty);
   const nd=diffDays(form.date_from,form.date_to);
 
@@ -994,8 +994,30 @@ function ResPage({sess,reload,reloadTick,addLog}) {
         await sbAuthPatch("reservations",editId,body,sess.token);
         addLog("Ndrysho Rezervim",form.car_name+" - "+form.client_name);
       } else {
-        await sbAuthPost("reservations",body,sess.token);
+        const [newRes]=await sbAuthPost("reservations",body,sess.token);
         addLog("Shto Rezervim",form.car_name+" - "+form.client_name+" "+fmtM(form.total_price,form.currency));
+        // Shto parapagimin ne arke nese eshte vendosur
+        if(form.prepayment&&Number(form.prepayment)>0){
+          const prepAmt=Number(form.prepayment);
+          const METHOD_LB2={cash:"💵 Cash",pos:"💳 POS",transfer:"🏦 Bankë"};
+          await sbAuthPost("cash_ledger",{
+            currency:form.currency,
+            amount:prepAmt,
+            method:form.prepayment_method||"cash",
+            type:"prepayment",
+            description:"Parapagim ("+METHOD_LB2[form.prepayment_method||"cash"]+"): "+form.car_name+" - "+form.client_name,
+            reference_id:newRes?.id||null,
+            created_by:sess.profile?.username||""
+          },sess.token);
+          // Perditeso amount_paid ne rezervim
+          const newPaid=prepAmt;
+          const isFull=newPaid>=Number(form.total_price);
+          await sbAuthPatch("reservations",newRes?.id,{
+            amount_paid:newPaid,
+            ...(isFull?{payment_status:"paguar",paid_at:new Date().toISOString(),paid_by:sess.profile?.username}:{})
+          },sess.token);
+          addLog("Parapagim ("+METHOD_LB2[form.prepayment_method||"cash"]+")",form.car_name+" - "+form.client_name+" "+fmtM(prepAmt,form.currency));
+        }
         // Shto klientin automatikisht nese nuk ekziston
         try {
           const existing = await sbAuthGet("clients","name=eq."+encodeURIComponent(form.client_name),sess.token);
@@ -1063,7 +1085,14 @@ function ResPage({sess,reload,reloadTick,addLog}) {
               <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>{fmtFull(r.date_from)}{r.pickup_time&&" "+r.pickup_time} → {fmtFull(r.date_to)}{r.return_time&&" "+r.return_time} · {diffDays(r.date_from,r.date_to)} ditë</div>
               <div style={{display:"flex",gap:6,marginTop:6,alignItems:"center",flexWrap:"wrap"}}>
                 <Badge s={r.status}/>
-                <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:r.payment_status==="paguar"?"#dcfce7":"#fef3c7",color:r.payment_status==="paguar"?"#166534":"#92400e"}}>{r.payment_status==="paguar"?"✅ Paguar":"⏳ Pritje"}</span>
+                <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:r.payment_status==="paguar"?"#dcfce7":Number(r.amount_paid||0)>0?"#dbeafe":"#fef3c7",color:r.payment_status==="paguar"?"#166534":Number(r.amount_paid||0)>0?"#1e40af":"#92400e"}}>
+                  {r.payment_status==="paguar"?"✅ Paguar":Number(r.amount_paid||0)>0?"💰 Para-"+fmtM(r.amount_paid,r.currency):"⏳ Pritje"}
+                </span>
+                {r.payment_status!=="paguar"&&Number(r.amount_paid||0)>0&&(
+                  <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:"#fef2f2",color:"#dc2626"}}>
+                    Detyrim: {fmtM(Number(r.total_price||0)-Number(r.amount_paid||0),r.currency)}
+                  </span>
+                )}
                 <div style={{flex:1}}/>
                 <button onClick={()=>setDetId(r.id)} style={{...IB,background:"#eff6ff",color:"#1d4ed8",fontWeight:700,fontSize:12,padding:"5px 10px"}}>🔍</button>
                 <button onClick={()=>{setForm({car_name:r.car_name,car_id:r.car_id||"",client_name:r.client_name,client_phone:r.client_phone||"",client_id_card:r.client_id_card||"",date_from:r.date_from,date_to:r.date_to,pickup_time:r.pickup_time||"10:00",return_time:r.return_time||"10:00",price_per_day:r.price_per_day,currency:r.currency,total_price:r.total_price,status:r.status,payment_status:r.payment_status,notes:r.notes||""});setEditId(r.id);setShowF(true)}} style={{...IB,fontSize:12,padding:"5px 10px"}}>✏️</button>
@@ -1102,6 +1131,34 @@ function ResPage({sess,reload,reloadTick,addLog}) {
           <Fld label={"Çmim/Ditë ("+nd+" d)"}><input type="number" value={form.price_per_day} onChange={e=>setForm(f=>({...f,price_per_day:e.target.value}))} style={FL}/></Fld>
           <Fld label="Monedha"><select value={form.currency} onChange={e=>setForm(f=>({...f,currency:e.target.value}))} style={FL}><option value="ALL">Lekë</option><option value="EUR">Euro</option></select></Fld>
           <Fld label="Totali *" col2><input type="number" value={form.total_price} onChange={e=>setForm(f=>({...f,total_price:e.target.value}))} style={{...FL,fontWeight:700}}/></Fld>
+          {/* Parapagimi */}
+          {!editId&&(
+            <div style={{gridColumn:"span 2",background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:"12px 14px"}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#166534",marginBottom:10}}>💰 Parapagim (opsional)</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <Fld label="Shuma Parapagimit">
+                  <input type="number" value={form.prepayment} onChange={e=>setForm(f=>({...f,prepayment:e.target.value}))} style={FL} placeholder="0"/>
+                </Fld>
+                <Fld label="Mënyra">
+                  <select value={form.prepayment_method} onChange={e=>setForm(f=>({...f,prepayment_method:e.target.value}))} style={FL}>
+                    <option value="cash">💵 Cash</option>
+                    <option value="pos">💳 POS</option>
+                    <option value="transfer">🏦 Bankë</option>
+                  </select>
+                </Fld>
+              </div>
+              {form.prepayment&&Number(form.prepayment)>0&&form.total_price&&(
+                <div style={{marginTop:8,display:"flex",gap:16,fontSize:12,flexWrap:"wrap"}}>
+                  <span style={{color:"#16a34a",fontWeight:700}}>✅ Parapagim: {fmtM(Number(form.prepayment),form.currency)}</span>
+                  <span style={{color:Number(form.total_price)-Number(form.prepayment)>0?"#dc2626":"#16a34a",fontWeight:700}}>
+                    {Number(form.total_price)-Number(form.prepayment)>0
+                      ?"⏳ Detyrim final: "+fmtM(Number(form.total_price)-Number(form.prepayment),form.currency)
+                      :"✅ Paguar plotësisht!"}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
           <Fld label="Statusi"><select value={form.status} onChange={e=>setForm(f=>({...f,status:e.target.value}))} style={FL}>{Object.keys(SC).map(s=><option key={s}>{s}</option>)}</select></Fld>
           <Fld label="Pagesa"><select value={form.payment_status} onChange={e=>setForm(f=>({...f,payment_status:e.target.value}))} style={FL}><option value="pritje">Pritje</option><option value="paguar">Paguar</option></select></Fld>
           <Fld label="Shënime" col2><textarea value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} style={{...FL,height:50,resize:"vertical"}}/></Fld>
@@ -2041,7 +2098,7 @@ function RptPage({sess,reloadTick}) {
 // ─── PASQYRA E TË ARDHURAVE DHE SHPENZIMEVE ──────────────────────────────────
 function PLReport({reses,exps,ledger,dFrom,dTo}){
   // Të ardhura sipas metodës pagese (nga cash_ledger)
-  const payments=ledger.filter(l=>l.type==="payment"||l.type==="manual_in");
+  const payments=ledger.filter(l=>l.type==="payment"||l.type==="manual_in"||l.type==="prepayment");
   function sumLedger(method,cur){ return payments.filter(l=>(l.method||"cash")===method&&l.currency===cur).reduce((s,l)=>s+Number(l.amount),0); }
 
   const incomeRows=[
@@ -2641,7 +2698,7 @@ function DepositsReport({cars,ledger,reses}){
 }
 
 function FinanceReport({cars,ledger,reses,view}){
-  const TYPE_LB={payment:"💵 Pagesë",manual_in:"➕ Hyrje Manuale",expense:"📤 Shpenzim",manual_out:"➖ Dalje Manuale",transfer:"🔄 Transfertë",deposit_in:"🔒 Depozitë Marrë",deposit_out:"↩️ Depozitë Kthyer"};
+  const TYPE_LB={payment:"💵 Pagesë",prepayment:"🟡 Parapagim",manual_in:"➕ Hyrje Manuale",expense:"📤 Shpenzim",manual_out:"➖ Dalje Manuale",transfer:"🔄 Transfertë",deposit_in:"🔒 Depozitë Marrë",deposit_out:"↩️ Depozitë Kthyer"};
   if(view==="detail"){
     const sorted=[...ledger].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
     return (
