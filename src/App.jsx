@@ -44,13 +44,17 @@ async function sbRefreshToken(refreshToken) {
 }
 async function sbUploadPhoto(file, carName, token) {
   const ext = file.name.split(".").pop();
-  const path = carName.replace(/\s+/g, "_") + "." + ext;
-  const r = await fetch(SB_URL + "/storage/v1/object/car-photos/" + path, {
+  const safeName = (carName||"makine").replace(/[^a-zA-Z0-9]+/g,"_").replace(/^_+|_+$/g,"") || "makine";
+  const path = safeName + "." + ext;
+  const r = await fetch(SB_URL + "/storage/v1/object/car-photos/" + encodeURIComponent(path), {
     method: "POST", headers: { "apikey": SB_KEY, "Authorization": "Bearer " + token, "Content-Type": file.type, "x-upsert": "true" },
     body: file
   });
-  if (!r.ok) throw new Error("Upload failed");
-  return STORAGE_URL + path;
+  if (!r.ok) {
+    const errText = await r.text().catch(()=>"");
+    throw new Error("Upload dështoi: " + (errText || r.status));
+  }
+  return STORAGE_URL + encodeURIComponent(path);
 }
 
 // Authenticated fetch (uses session token)
@@ -217,7 +221,8 @@ function Err({msg, onRetry}) { return <div style={{padding:24,background:"#fef2f
 // ─── APP ROOT ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [sess, setSess] = useState(null);
-  const [page, setPage] = useState("cal");
+  const [page, setPage] = useState(()=>localStorage.getItem("crm_last_page")||"cal");
+  useEffect(()=>{ localStorage.setItem("crm_last_page",page); },[page]);
   const [lf, setLf]     = useState({email:"", password:"", err:"", loading:false});
   const [reloadTick, setReloadTick] = useState(0);
   const reload = useCallback(() => setReloadTick(t=>t+1), []);
@@ -393,7 +398,7 @@ export default function App() {
       <div style={{flex:1,overflow:"auto"}}>
         {curPage==="cal" && <CalPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
         {curPage==="res" && <ResPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
-        {curPage==="fin" && <FinPage  sess={sess} reloadTick={reloadTick}/>}
+        {curPage==="fin" && <FinPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
         {curPage==="rpt" && <RptPage  sess={sess} reloadTick={reloadTick}/>}
         {curPage==="srv" && <SrvPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
         {curPage==="ark" && <ArkPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
@@ -407,6 +412,7 @@ export default function App() {
 
 // ─── LOGIN ────────────────────────────────────────────────────────────────────
 function LoginScreen({lf,setLf,login}) {
+  const [showPass,setShowPass]=useState(false);
   const brand = JSON.parse(localStorage.getItem("crm_brand")||"{}");
   const logoUrl = brand.logoUrl || "";
   const appName = brand.appName || "Car Rental Manager";
@@ -451,9 +457,14 @@ function LoginScreen({lf,setLf,login}) {
         </div>
         <div style={{marginBottom:10}}>
           <label style={{color:"#8a7a45",fontSize:10,fontWeight:700,letterSpacing:2,display:"block",marginBottom:7,textTransform:"uppercase"}}>Fjalëkalimi</label>
-          <input type="password" value={lf.password} onChange={e=>setLf(f=>({...f,password:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&login()}
-            placeholder="••••••••"
-            style={{width:"100%",padding:"13px 14px",borderRadius:10,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(201,168,76,0.22)",color:"#dcc88a",fontSize:14,outline:"none",boxSizing:"border-box",fontFamily:"inherit"}}/>
+          <div style={{position:"relative"}}>
+            <input type={showPass?"text":"password"} value={lf.password} onChange={e=>setLf(f=>({...f,password:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&login()}
+              placeholder="••••••••"
+              style={{width:"100%",padding:"13px 40px 13px 14px",borderRadius:10,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(201,168,76,0.22)",color:"#dcc88a",fontSize:14,outline:"none",boxSizing:"border-box",fontFamily:"inherit"}}/>
+            <button type="button" onClick={()=>setShowPass(s=>!s)} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#8a7a45",fontSize:16,padding:4}}>
+              {showPass?"🙈":"👁️"}
+            </button>
+          </div>
         </div>
 
         {lf.err&&<div style={{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.25)",color:"#fca5a5",borderRadius:8,padding:"9px 12px",fontSize:12,marginTop:8}}>⚠️ {lf.err}</div>}
@@ -492,11 +503,18 @@ function CalPage({sess,reload,reloadTick,addLog}) {
     Promise.all([
       sbAuthGet("cars","order=sort_order.asc",sess.token),
       sbAuthGet("reservations","status=neq.Anuluar",sess.token)
-    ]).then(([c,r])=>{setCars(c);setReses(r);setLoading(false);}).catch(()=>setLoading(false));
+    ]).then(([c,r])=>{setCars(c.filter(x=>x.active!==false));setReses(r);setLoading(false);}).catch(()=>setLoading(false));
   },[reloadTick,sess.token]);
 
   function sameCar(r,car) { return car.id&&r.car_id ? r.car_id===car.id : r.car_name===car.name; }
   function resStart(car,dt) { return reses.find(r=>sameCar(r,car)&&r.date_from===dt); }
+  // Per diten e pare te dukshme te tabeles, kap edhe rezervimet qe kane filluar PARA fillimit te dritares, por vazhdojne brenda saj
+  function findRenderStart(car,dt,di) {
+    const exact = resStart(car,dt);
+    if(exact) return exact;
+    if(di===0) return reses.find(r=>sameCar(r,car)&&r.date_from<dt&&dt<=r.date_to);
+    return null;
+  }
   function rowSpan(r,ri) { let s=0; for(let i=ri;i<dates.length;i++){if(dates[i]>=r.date_from&&dates[i]<=r.date_to)s++;else if(dates[i]>r.date_to)break;} return s||1; }
   function covered(car,dt) { return reses.some(r=>sameCar(r,car)&&dt>r.date_from&&dt<=r.date_to); }
   const MONTH_SQ=["Jan","Shk","Mar","Pri","Maj","Qer","Kor","Gus","Sht","Tet","Nën","Dhj"];
@@ -559,18 +577,21 @@ function CalPage({sess,reload,reloadTick,addLog}) {
               const cc=carColor(car.name,cars.map(c=>c.name));
               return (
                 <tr key={car.id}>
-                  {/* CAR cell — sticky left */}
+                  {/* CAR cell — sticky left, foto si sfond */}
                   <td title={car.model||""} style={{
-                    width:CAR_W,minWidth:CAR_W,height:ROW_H,padding:"0 4px",textAlign:"center",
-                    background:cc.bg,borderRight:"2px solid "+cc.ac,borderBottom:"1px solid #e5e7eb",
+                    width:CAR_W,minWidth:CAR_W,height:ROW_H,padding:0,textAlign:"center",
+                    overflow:"hidden",
+                    background:car.photo_url?("linear-gradient(rgba(0,0,0,0.45),rgba(0,0,0,0.45)), url('"+car.photo_url+"') center/cover no-repeat"):cc.bg,
+                    borderRight:"2px solid "+cc.ac,borderBottom:"1px solid #e5e7eb",
                     position:"sticky",left:0,zIndex:2
                   }}>
-                    <div style={{fontSize:9,fontWeight:800,color:cc.tx,lineHeight:1.2,letterSpacing:"0.2px",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{car.targa||car.name}</div>
+                    <div style={{fontSize:10,fontWeight:900,color:car.photo_url?"#fff":cc.tx,lineHeight:1.1,letterSpacing:"0.2px",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textShadow:car.photo_url?"0 1px 3px rgba(0,0,0,0.7)":"none",padding:"0 3px"}}>{car.targa||car.name}</div>
+                    {car.model&&<div style={{fontSize:7,fontWeight:600,color:car.photo_url?"rgba(255,255,255,0.85)":cc.tx+"aa",lineHeight:1.1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textShadow:car.photo_url?"0 1px 2px rgba(0,0,0,0.7)":"none",padding:"0 3px"}}>{car.model}</div>}
                   </td>
 
                   {dates.map((dt,di)=>{
-                    if(covered(car,dt)) return null;
-                    const r=resStart(car,dt);
+                    if(di>0&&covered(car,dt)) return null;
+                    const r=findRenderStart(car,dt,di);
                     const isT=dt===td, isW=isWE(dt);
                     const d=new Date(dt);
                     const isFirstOfMonth=d.getDate()===1;
@@ -639,13 +660,14 @@ function CalPage({sess,reload,reloadTick,addLog}) {
         ))}
       </div>
 
-      {det&&<DetModal r={det} sess={sess} addLog={addLog} reload={reload} onClose={()=>setDet(null)} onUpd={u=>setDet(u)} cars={cars}/>}
+      {det&&<DetModal r={det} sess={sess} addLog={addLog} reload={reload} onClose={()=>setDet(null)} onUpd={u=>setDet(u)} cars={cars} reses={reses}/>}
     </div>
   );
 }
 
 // ─── DETAIL MODAL ─────────────────────────────────────────────────────────────
-function DetModal({r,sess,addLog,reload,onClose,onUpd,cars}) {
+function DetModal({r,sess,addLog,reload,onClose,onUpd,cars,reses}) {
+  const [carSetting,setCarSetting]=useState(null);
   const [cur,setCur]=useState(r);
   const [cn,setCn]=useState(r.cond_note||"");
   const [rn,setRn]=useState(r.ret_note||"");
@@ -653,6 +675,22 @@ function DetModal({r,sess,addLog,reload,onClose,onUpd,cars}) {
   const [kmIn,setKmIn]=useState(r.km_in||"");
   const [saving,setSaving]=useState(false);
   const [saved,setSaved]=useState(false);
+
+  const [payMethod,setPayMethod]=useState("cash");
+  const [depAmt,setDepAmt]=useState("");
+  const [depCurrency,setDepCurrency]=useState(r.currency||"ALL");
+  const [depTx,setDepTx]=useState([]);
+  const [returningDep,setReturningDep]=useState(false);
+
+  useEffect(()=>{
+    sbAuthGet("car_settings","car_name=eq."+encodeURIComponent(cur.car_name),sess.token)
+      .then(rows=>setCarSetting(rows[0]||null)).catch(()=>setCarSetting(null));
+  },[cur.car_name]);
+
+  useEffect(()=>{
+    sbAuthGet("cash_ledger","reference_id=eq."+cur.id+"&type=in.(deposit_in,deposit_out)",sess.token)
+      .then(rows=>setDepTx(rows||[])).catch(()=>setDepTx([]));
+  },[cur.id,saving]);
 
   async function patch(fields) {
     setSaving(true);
@@ -664,23 +702,24 @@ function DetModal({r,sess,addLog,reload,onClose,onUpd,cars}) {
     } catch(e){alert(e.message);}
     setSaving(false);
   }
-  async function addToLedger(amount,currency,type,desc,refId){
+  async function addToLedger(amount,currency,type,desc,refId,method){
     try {
       await sbAuthPost("cash_ledger",{
         currency,
         amount:Number(amount),
         type,
+        method:method||"cash",
         description:desc,
         reference_id:refId||cur.id,
         created_by:sess.profile?.username||""
       }, sess.token);
     } catch(e){ console.error("addToLedger ERROR:", e.message); }
   }
+  const METHOD_LB={cash:"💵 Cash",pos:"💳 POS",transfer:"🏦 Transfertë"};
   async function doDeliver(){
     const now=new Date().toISOString(), time=new Date().toTimeString().slice(0,5);
-    if(!kmOut){alert("Fut km e makinës në momentin e dorëzimit");return;}
-    await patch({status:"Dorëzuar",deliv_at:now,deliv_by:sess.profile?.username,deliv_time:time,km_out:Number(kmOut)});
-    addLog("Dorëzim",cur.car_name+" → "+cur.client_name+" · "+kmOut+" km");
+    await patch({status:"Dorëzuar",deliv_at:now,deliv_by:sess.profile?.username,deliv_time:time,km_out:kmOut?Number(kmOut):null});
+    addLog("Dorëzim",cur.car_name+" → "+cur.client_name+(kmOut?" · "+kmOut+" km":""));
   }
   async function doCollect(){
     // Mos shto ne arke nese eshte paguar tashme
@@ -688,8 +727,8 @@ function DetModal({r,sess,addLog,reload,onClose,onUpd,cars}) {
     const now=new Date().toISOString();
     const remaining=Number(cur.total_price)-Number(cur.amount_paid||0);
     await patch({payment_status:"paguar",paid_at:now,paid_by:sess.profile?.username,amount_paid:cur.total_price});
-    await addToLedger(remaining,cur.currency,"payment","Pagesë: "+cur.car_name+" - "+cur.client_name);
-    addLog("Arkëtim",cur.car_name+" "+fmtM(remaining,cur.currency));
+    await addToLedger(remaining,cur.currency,"payment","Pagesë ("+METHOD_LB[payMethod]+"): "+cur.car_name+" - "+cur.client_name,null,payMethod);
+    addLog("Arkëtim",cur.car_name+" "+fmtM(remaining,cur.currency)+" · "+METHOD_LB[payMethod]);
   }
   const [partAmt,setPartAmt]=useState("");
   const [collecting,setCollecting]=useState(false);
@@ -704,8 +743,8 @@ function DetModal({r,sess,addLog,reload,onClose,onUpd,cars}) {
         ?{amount_paid:cur.total_price,payment_status:"paguar",paid_at:new Date().toISOString(),paid_by:sess.profile?.username}
         :{amount_paid:newPaid};
       await patch(fields);
-      await addToLedger(a,cur.currency,"payment","Pagesë pjesë: "+cur.car_name+" - "+cur.client_name);
-      addLog("Arkëtim Pjesë",cur.car_name+" "+fmtM(a,cur.currency));
+      await addToLedger(a,cur.currency,"payment","Pagesë pjesë ("+METHOD_LB[payMethod]+"): "+cur.car_name+" - "+cur.client_name,null,payMethod);
+      addLog("Arkëtim Pjesë",cur.car_name+" "+fmtM(a,cur.currency)+" · "+METHOD_LB[payMethod]);
       setPartAmt("");
     } catch(e){alert(e.message);}
     setCollecting(false);
@@ -713,17 +752,44 @@ function DetModal({r,sess,addLog,reload,onClose,onUpd,cars}) {
   async function doDeliverPay(){
     // Mos shto ne arke nese eshte paguar tashme
     if(cur.payment_status==="paguar") return;
-    if(!kmOut){alert("Fut km e makinës në momentin e dorëzimit");return;}
     const now=new Date().toISOString(), time=new Date().toTimeString().slice(0,5);
     const remaining=Number(cur.total_price)-Number(cur.amount_paid||0);
-    await patch({status:"Dorëzuar",deliv_at:now,deliv_by:sess.profile?.username,deliv_time:time,payment_status:"paguar",paid_at:now,paid_by:sess.profile?.username,amount_paid:cur.total_price,km_out:Number(kmOut)});
-    await addToLedger(remaining,cur.currency,"payment","Pagesë: "+cur.car_name+" - "+cur.client_name);
-    addLog("Dorëzim+Arkëtim",cur.car_name+" "+fmtM(remaining,cur.currency)+" · "+kmOut+" km");
+    await patch({status:"Dorëzuar",deliv_at:now,deliv_by:sess.profile?.username,deliv_time:time,payment_status:"paguar",paid_at:now,paid_by:sess.profile?.username,amount_paid:cur.total_price,km_out:kmOut?Number(kmOut):null});
+    await addToLedger(remaining,cur.currency,"payment","Pagesë ("+METHOD_LB[payMethod]+"): "+cur.car_name+" - "+cur.client_name,null,payMethod);
+    addLog("Dorëzim+Arkëtim",cur.car_name+" "+fmtM(remaining,cur.currency)+(kmOut?" · "+kmOut+" km":"")+" · "+METHOD_LB[payMethod]);
+  }
+  const depCur = depTx.length ? depTx[depTx.length-1].currency : depCurrency;
+  const depositHeld = depTx.filter(t=>t.type==="deposit_in").reduce((s,t)=>s+Number(t.amount),0) + depTx.filter(t=>t.type==="deposit_out").reduce((s,t)=>s+Number(t.amount),0);
+  async function doTakeDeposit(){
+    const a=Number(depAmt);
+    if(!a||a<=0) return;
+    await addToLedger(a,depCurrency,"deposit_in","Depozitë: "+cur.car_name+" - "+cur.client_name,cur.id,payMethod);
+    addLog("Merr Depozitë",cur.car_name+" "+fmtM(a,depCurrency));
+    setDepAmt("");
+    sbAuthGet("cash_ledger","reference_id=eq."+cur.id+"&type=in.(deposit_in,deposit_out)",sess.token).then(rows=>setDepTx(rows||[]));
+  }
+  async function doReturnDeposit(){
+    if(depositHeld<=0) return;
+    if(!confirm("Konfirmo kthimin e depozitës "+fmtM(depositHeld,depCur)+" te klienti?")) return;
+    setReturningDep(true);
+    await addToLedger(-depositHeld,depCur,"deposit_out","Kthim depozite: "+cur.car_name+" - "+cur.client_name,cur.id,payMethod);
+    addLog("Kthim Depozitë",cur.car_name+" "+fmtM(depositHeld,depCur));
+    setReturningDep(false);
+    sbAuthGet("cash_ledger","reference_id=eq."+cur.id+"&type=in.(deposit_in,deposit_out)",sess.token).then(rows=>setDepTx(rows||[]));
   }
   async function doReturn(){
     if(!kmIn){alert("Fut km e makinës në momentin e marrjes");return;}
+    const kmInNum=Number(kmIn);
+    const oilFloor=carSetting?.last_oil_km?Number(carSetting.last_oil_km):0;
+    const priorMaxKm=Math.max(0,...(reses||[]).filter(x=>x.car_name===cur.car_name&&x.id!==cur.id&&x.km_in).map(x=>Number(x.km_in)));
+    const floor=Math.max(oilFloor,priorMaxKm);
+    if(kmInNum<floor){
+      const reason=oilFloor>=priorMaxKm?"kur janë ndërruar vaj/filtrat":"herën e fundit";
+      alert("⚠️ Km e shkruar ("+kmInNum.toLocaleString()+") është më pak se "+floor.toLocaleString()+" km — kjo makinë ka pasur "+floor.toLocaleString()+" km "+reason+". Kontrollo numrin.");
+      return;
+    }
     const now=new Date().toISOString(), time=new Date().toTimeString().slice(0,5);
-    await patch({status:"Përfunduar",ret_at:now,ret_by:sess.profile?.username,ret_time:time,ret_note:rn,cond_note:cn,km_in:Number(kmIn)});
+    await patch({status:"Përfunduar",ret_at:now,ret_by:sess.profile?.username,ret_time:time,ret_note:rn,cond_note:cn,km_in:kmInNum});
     addLog("Marrje",cur.car_name+" ← "+cur.client_name+" · "+kmIn+" km");
   }
   async function saveNotes(){
@@ -760,12 +826,50 @@ function DetModal({r,sess,addLog,reload,onClose,onUpd,cars}) {
             {cur.paid_at&&<div style={{fontSize:11,color:"#64748b"}}>{fmtDT(cur.paid_at)} · {cur.paid_by}</div>}
             {!paid&&amountPaid>0&&<div style={{fontSize:11,color:"#92400e",marginTop:2}}>Paguar: {fmtM(amountPaid,cur.currency)} · Detyrim: <strong>{fmtM(debt,cur.currency)}</strong></div>}
           </div>
-          {!paid&&!done&&<button onClick={doCollect} disabled={saving} style={{...PB,background:"#16a34a",fontSize:12,padding:"6px 12px"}}>💵 Arkëto Gjithë</button>}
         </div>
         {!paid&&!done&&(
-          <div style={{display:"flex",gap:6,marginTop:10}}>
-            <input type="number" value={partAmt} onChange={e=>setPartAmt(e.target.value)} placeholder={"Shumë (max "+fmtM(debt,cur.currency)+")"} style={{...FL,flex:1,fontSize:12,padding:"7px 10px"}}/>
-            <button onClick={doCollectPart} disabled={collecting||!partAmt} style={{...PB,background:"#0ea5e9",fontSize:12,padding:"7px 12px",whiteSpace:"nowrap"}}>{collecting?"...":"💰 Arkëto Pjesë"}</button>
+          <>
+            <div style={{display:"flex",gap:5,marginTop:10,marginBottom:8}}>
+              {Object.entries(METHOD_LB).map(([m,lb])=>(
+                <button key={m} onClick={()=>setPayMethod(m)} style={{
+                  flex:1,border:"1px solid "+(payMethod===m?"#1d4ed8":"#e2e8f0"),borderRadius:7,padding:"6px 4px",
+                  fontSize:11,fontWeight:700,cursor:"pointer",
+                  background:payMethod===m?"#eff6ff":"#fff",color:payMethod===m?"#1d4ed8":"#64748b"
+                }}>{lb}</button>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+              <button onClick={doCollect} disabled={saving} style={{...PB,background:"#16a34a",fontSize:12,padding:"7px 12px",whiteSpace:"nowrap"}}>💵 Arkëto Gjithë</button>
+              <input type="number" value={partAmt} onChange={e=>setPartAmt(e.target.value)} placeholder={"Shumë (max "+fmtM(debt,cur.currency)+")"} style={{...FL,flex:1,fontSize:12,padding:"7px 10px"}}/>
+              <button onClick={doCollectPart} disabled={collecting||!partAmt} style={{...PB,background:"#0ea5e9",fontSize:12,padding:"7px 12px",whiteSpace:"nowrap"}}>{collecting?"...":"Pjesë"}</button>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Depozitë */}
+      <div style={{padding:"10px 14px",borderRadius:9,marginBottom:12,background:depositHeld>0?"#eff6ff":"#f8fafc",border:"1px solid "+(depositHeld>0?"#bfdbfe":"#e2e8f0")}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:depositHeld>0?8:0}}>
+          <span style={{fontSize:16}}>🔒</span>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:700,fontSize:13,color:depositHeld>0?"#1e40af":"#64748b"}}>Depozitë</div>
+            {depositHeld>0
+              ? <div style={{fontSize:12,color:"#1e40af"}}>Mban aktualisht: <strong>{fmtM(depositHeld,depCur)}</strong></div>
+              : <div style={{fontSize:11,color:"#94a3b8"}}>Nuk ka depozitë të mbajtur</div>
+            }
+          </div>
+          {depositHeld>0&&(
+            <button onClick={doReturnDeposit} disabled={returningDep} style={{...PB,background:"#7c3aed",fontSize:11,padding:"6px 10px",whiteSpace:"nowrap"}}>↩️ Kthe Depozitën</button>
+          )}
+        </div>
+        {!done&&(
+          <div style={{display:"flex",gap:6}}>
+            <input type="number" value={depAmt} onChange={e=>setDepAmt(e.target.value)} placeholder="Shumë depozitë..." style={{...FL,flex:1,fontSize:12,padding:"7px 10px"}}/>
+            <select value={depCurrency} onChange={e=>setDepCurrency(e.target.value)} style={{...FL,flex:"0 0 80px",fontSize:12,padding:"7px 6px"}}>
+              <option value="ALL">Lekë</option>
+              <option value="EUR">Euro</option>
+            </select>
+            <button onClick={doTakeDeposit} disabled={!depAmt} style={{...PB,background:"#1d4ed8",fontSize:12,padding:"7px 12px",whiteSpace:"nowrap"}}>➕ Merr Depozitë</button>
           </div>
         )}
       </div>
@@ -774,7 +878,7 @@ function DetModal({r,sess,addLog,reload,onClose,onUpd,cars}) {
         <div style={{marginBottom:12}}>
           {(cur.status==="Konfirmuar"||cur.status==="Aktive")&&(
             <div style={{marginBottom:8}}>
-              <label style={{fontSize:12,fontWeight:700,color:"#374151",display:"block",marginBottom:3}}>🚗 Km në momentin e dorëzimit *</label>
+              <label style={{fontSize:12,fontWeight:700,color:"#374151",display:"block",marginBottom:3}}>🚗 Km në momentin e dorëzimit (opsionale)</label>
               <input type="number" value={kmOut} onChange={e=>setKmOut(e.target.value)} placeholder="p.sh. 45200" style={FL}/>
             </div>
           )}
@@ -834,6 +938,16 @@ function ResPage({sess,reload,reloadTick,addLog}) {
   const [form,setForm]=useState(empty);
   const nd=diffDays(form.date_from,form.date_to);
 
+  const liveConflicts = (form.car_name&&form.date_from&&form.date_to) ? reses.filter(r=>{
+    const sameCar=form.car_id?r.car_id===form.car_id:r.car_name===form.car_name;
+    if(!sameCar) return false;
+    if(r.status==="Anuluar"||r.status==="Përfunduar") return false;
+    if(editId&&r.id===editId) return false;
+    return form.date_from<=r.date_to&&form.date_to>=r.date_from;
+  }) : [];
+  const selectedCarObj = cars.find(c=>c.name===form.car_name);
+  const isPassiveCar = selectedCarObj && selectedCarObj.active===false;
+
   useEffect(()=>{
     setLoading(true);
     Promise.all([
@@ -852,6 +966,11 @@ function ResPage({sess,reload,reloadTick,addLog}) {
     if(!form.date_from||!form.date_to){alert("Zgjidh datat e rezervimit");return;}
     if(form.date_to < form.date_from){
       alert("Data e kthimit nuk mund të jetë para datës së marrjes! Kontrollo datat e zgjedhura.");
+      return;
+    }
+    const selCarObj=cars.find(c=>c.name===form.car_name);
+    if(selCarObj&&selCarObj.active===false){
+      alert("⚠️ Kjo makinë është PASIVE dhe nuk mund të rezervohet. Kontakto administratorin.");
       return;
     }
     try {
@@ -970,12 +1089,16 @@ function ResPage({sess,reload,reloadTick,addLog}) {
           <Fld label="Ora Dorëzimit"><input type="time" value={form.return_time} onChange={e=>setForm(f=>({...f,return_time:e.target.value}))} style={FL}/></Fld>
           <Fld label="Km kur u dha"><input type="number" value={form.km_out||""} onChange={e=>setForm(f=>({...f,km_out:e.target.value}))} style={FL} placeholder="p.sh. 45200"/></Fld>
           <Fld label="Km kur u kthye"><input type="number" value={form.km_in||""} onChange={e=>setForm(f=>({...f,km_in:e.target.value}))} style={FL} placeholder="p.sh. 46800"/></Fld>
-          {form.car_name&&form.date_from&&form.date_to&&(()=>{
-            const cf=reses.filter(r=>r.car_name===form.car_name&&r.status!=="Anuluar"&&r.status!=="Përfunduar"&&(!editId||r.id!==editId)&&form.date_from<=r.date_to&&form.date_to>=r.date_from);
-            return cf.length>0?<div style={{gridColumn:"span 2",background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#dc2626",fontWeight:600}}>
-              ⚠️ Makina e zënë: {cf.map(r=>r.client_name+" ("+fmtFull(r.date_from)+" - "+fmtFull(r.date_to)+")").join(", ")}
-            </div>:null;
-          })()}
+          {isPassiveCar&&(
+            <div style={{gridColumn:"span 2",background:"#f1f5f9",border:"2px solid #64748b",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#334155",fontWeight:700}}>
+              ⚠️ Kjo makinë është <strong>PASIVE</strong> — nuk mund të rezervohet. Kontakto administratorin.
+            </div>
+          )}
+          {liveConflicts.length>0&&(
+            <div style={{gridColumn:"span 2",background:"#fef2f2",border:"2px solid #dc2626",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#991b1b",fontWeight:700}}>
+              🚫 Makina e ZËNË për këto data! {liveConflicts.map(r=>r.client_name+" ("+fmtFull(r.date_from)+" - "+fmtFull(r.date_to)+")").join(", ")} — zgjidh datë tjetër ose makinë tjetër.
+            </div>
+          )}
           <Fld label={"Çmim/Ditë ("+nd+" d)"}><input type="number" value={form.price_per_day} onChange={e=>setForm(f=>({...f,price_per_day:e.target.value}))} style={FL}/></Fld>
           <Fld label="Monedha"><select value={form.currency} onChange={e=>setForm(f=>({...f,currency:e.target.value}))} style={FL}><option value="ALL">Lekë</option><option value="EUR">Euro</option></select></Fld>
           <Fld label="Totali *" col2><input type="number" value={form.total_price} onChange={e=>setForm(f=>({...f,total_price:e.target.value}))} style={{...FL,fontWeight:700}}/></Fld>
@@ -985,21 +1108,22 @@ function ResPage({sess,reload,reloadTick,addLog}) {
         </div>
         <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16}}>
           <button onClick={()=>setShowF(false)} style={CB}>Anulo</button>
-          <button onClick={doSave} style={PB}>💾 Ruaj</button>
+          <button onClick={doSave} disabled={liveConflicts.length>0||isPassiveCar} style={{...PB,opacity:(liveConflicts.length>0||isPassiveCar)?0.5:1,cursor:(liveConflicts.length>0||isPassiveCar)?"not-allowed":"pointer"}}>💾 Ruaj</button>
         </div>
       </Modal>}
-      {detR&&<DetModal r={detR} sess={sess} addLog={addLog} reload={reload} onClose={()=>setDetId(null)} onUpd={u=>{setDetId(u.id);setReses(rs=>rs.map(x=>x.id===u.id?u:x));}} cars={cars}/>}
+      {detR&&<DetModal r={detR} sess={sess} addLog={addLog} reload={reload} onClose={()=>setDetId(null)} onUpd={u=>{setDetId(u.id);setReses(rs=>rs.map(x=>x.id===u.id?u:x));}} cars={cars} reses={reses}/>}
     </div>
   );
 }
 
 // ─── FINANCE ─────────────────────────────────────────────────────────────────
-function FinPage({sess,reloadTick}) {
+function FinPage({sess,reload,reloadTick,addLog}) {
   const [reses,setReses]=useState([]);
   const [exps,setExps]=useState([]);
   const [cars,setCars]=useState([]);
   const [ledger,setLedger]=useState([]);
   const [loading,setLoading]=useState(true);
+  const [returningId,setReturningId]=useState(null);
 
   useEffect(()=>{
     setLoading(true);
@@ -1008,6 +1132,33 @@ function FinPage({sess,reloadTick}) {
   },[reloadTick,sess.token]);
 
   if(loading) return <Spin/>;
+
+  // Depozitat e mbajtura (te pa-kthyera) - grupuar sipas rezervimit
+  const resById={}; reses.forEach(r=>{resById[r.id]=r;});
+  const depGroups={};
+  ledger.filter(l=>l.type==="deposit_in"||l.type==="deposit_out").forEach(l=>{
+    const rid=l.reference_id; if(!rid) return;
+    if(!depGroups[rid]) depGroups[rid]={reservation:resById[rid],held:0,currency:l.currency};
+    depGroups[rid].held += Number(l.amount);
+    depGroups[rid].currency=l.currency;
+  });
+  const heldDeposits=Object.entries(depGroups).filter(([,g])=>g.held>0.01&&g.reservation);
+
+  async function returnDeposit(rid,g){
+    if(!confirm("Konfirmo kthimin e depozitës "+fmtM(g.held,g.currency)+" te "+g.reservation.client_name+"?")) return;
+    setReturningId(rid);
+    try {
+      await sbAuthPost("cash_ledger",{
+        currency:g.currency, amount:-g.held, type:"deposit_out", method:"cash",
+        description:"Kthim depozite: "+g.reservation.car_name+" - "+g.reservation.client_name,
+        reference_id:rid, created_by:sess.profile?.username||""
+      },sess.token);
+      addLog&&addLog("Kthim Depozitë",g.reservation.car_name+" "+fmtM(g.held,g.currency));
+      reload&&reload();
+      setLedger(ls=>[...ls,{type:"deposit_out",amount:-g.held,currency:g.currency,reference_id:rid}]);
+    } catch(e){ alert(e.message); }
+    setReturningId(null);
+  }
 
   const paid=reses.filter(r=>r.status!=="Anuluar"&&Number(r.amount_paid||0)>0);
   // Të ardhurat vijnë nga cash_ledger (arkëtime + hyrje manuale) - reflekton çdo arkëtim real, i plotë ose i pjesshëm
@@ -1036,6 +1187,24 @@ function FinPage({sess,reloadTick}) {
           </div>
         ))}
       </div>
+
+      {heldDeposits.length>0&&(
+        <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,padding:20,marginBottom:16}}>
+          <h3 style={{margin:"0 0 14px",fontSize:15,fontWeight:700,color:"#0f172a"}}>🔒 Depozita të Mbajtura — Kthim te Klientët</h3>
+          {heldDeposits.map(([rid,g])=>(
+            <div key={rid} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:"1px solid #f1f5f9"}}>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700,fontSize:13,color:"#0f172a"}}>{g.reservation.client_name}</div>
+                <div style={{fontSize:11,color:"#94a3b8"}}>{carLabel(g.reservation.car_name,cars)}</div>
+              </div>
+              <div style={{fontWeight:800,fontSize:15,color:"#1e40af"}}>{fmtM(g.held,g.currency)}</div>
+              <button onClick={()=>returnDeposit(rid,g)} disabled={returningId===rid} style={{...PB,background:"#7c3aed",fontSize:12,padding:"7px 14px",whiteSpace:"nowrap"}}>
+                {returningId===rid?"...":"↩️ Kthe"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,padding:20,marginBottom:16}}>
         <h3 style={{margin:"0 0 16px",fontSize:15,fontWeight:700,color:"#0f172a"}}>🚗 Të Ardhura Sipas Makinës</h3>
@@ -1272,16 +1441,7 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
       reload(); setShowE(false); setEf({description:"",amount:"",currency:"ALL",category:"Mirëmbajtje",car_name:"",expense_date:todayY()});
     } catch(e){alert(e.message);}
   }
-  async function delExp(id){
-    const e=exps.find(x=>x.id===id);
-    if(!e) return;
-    try {
-      await sbAuthDelete("expenses",id,sess.token);
-      await sbAuthPost("cash_ledger",{currency:e.currency,amount:Number(e.amount),type:"manual_in",description:"Anulim shpenzimi: "+e.description,created_by:sess.profile?.username},sess.token);
-      addLog("Fshi Shpenzim",e.description);
-      reload();
-    } catch(ex){alert(ex.message);}
-  }
+  // Fshirja e shpenzimeve/levizjeve te arkes eshte e ndaluar qellimisht per integritet te regjistrit financiar.
 
   // Build statement rows - sorted ascending for running balance
   const curCur=arkTab==="lek"?"ALL":"EUR";
@@ -1648,7 +1808,8 @@ function CarPicker({cars,value,onChange,placeholder}) {
   },[]);
   const selCar=cars.find(c=>c.name===value);
   const label=selCar?(selCar.targa?selCar.targa+(selCar.model?" · "+selCar.model:""):selCar.name):"";
-  const filtered=cars.filter(c=>{
+  const selectableCars=cars.filter(c=>c.active!==false);
+  const filtered=selectableCars.filter(c=>{
     const s=(c.targa||"")+" "+(c.model||c.name||"");
     return !q||s.toLowerCase().includes(q.toLowerCase());
   });
@@ -1669,6 +1830,7 @@ function CarPicker({cars,value,onChange,placeholder}) {
               style={{padding:"9px 12px",cursor:"pointer",fontSize:13,borderBottom:"1px solid #f1f5f9",background:c.name===value?"#eff6ff":"#fff"}}>
               <strong>{c.targa||"— pa targë —"}</strong>
               <span style={{color:"#64748b"}}>{c.model?" · "+c.model:(!c.targa&&c.name)?" · "+c.name:""}</span>
+              {c.active===false&&<span style={{marginLeft:6,fontSize:10,fontWeight:700,color:"#94a3b8"}}>(Pasive)</span>}
             </div>
           ))}
         </div>
@@ -1736,18 +1898,30 @@ function RptPage({sess,reloadTick}) {
   const [cars,setCars]=useState([]);
   const [clients,setClients]=useState([]);
   const [srvs,setSrvs]=useState([]);
+  const [carSettings,setCarSettings]=useState([]);
   const [loading,setLoading]=useState(true);
   const [tab,setTab]=useState("cars");
   const [view,setView]=useState("summary");
   const [selCars,setSelCars]=useState([]);
+  const [selDocTypes,setSelDocTypes]=useState([]);
   const [selClient,setSelClient]=useState("");
   const [dFrom,setDFrom]=useState("");
   const [dTo,setDTo]=useState("");
   const [shown,setShown]=useState(false);
+  const [filtersOpen,setFiltersOpen]=useState("cars");
 
-  function chTab(id){ setTab(id); setShown(false); }
+  function chTab(id){
+    if(tab===id){
+      setFiltersOpen(o=>o===id?null:id);
+    } else {
+      setTab(id);
+      setFiltersOpen(id);
+      setShown(false);
+    }
+  }
   function chView(v){ setView(v); setShown(false); }
   function chCars(v){ setSelCars(v); setShown(false); }
+  function chDocType(t){ setSelDocTypes(s=>s.includes(t)?s.filter(x=>x!==t):[...s,t]); setShown(false); }
   function chClient(v){ setSelClient(v); setShown(false); }
   function chFrom(v){ setDFrom(v); setShown(false); }
   function chTo(v){ setDTo(v); setShown(false); }
@@ -1760,8 +1934,9 @@ function RptPage({sess,reloadTick}) {
       sbAuthGet("cash_ledger","",sess.token),
       sbAuthGet("cars","order=sort_order.asc",sess.token),
       sbAuthGet("clients","",sess.token),
-      sbAuthGet("car_services","",sess.token)
-    ]).then(([r,e,l,cr,cl,sv])=>{setReses(r);setExps(e);setLedger(l);setCars(cr);setClients(cl);setSrvs(sv);setLoading(false);}).catch(()=>setLoading(false));
+      sbAuthGet("car_services","",sess.token),
+      sbAuthGet("car_settings","",sess.token)
+    ]).then(([r,e,l,cr,cl,sv,cset])=>{setReses(r);setExps(e);setLedger(l);setCars(cr);setClients(cl);setSrvs(sv);setCarSettings(cset);setLoading(false);}).catch(()=>setLoading(false));
   },[reloadTick,sess.token]);
 
   if(loading) return <Spin/>;
@@ -1780,20 +1955,69 @@ function RptPage({sess,reloadTick}) {
     return cn&&carSet.has(cn);
   });
   const fSrvs=srvs.filter(s=>!carSet||carSet.has(s.car_name));
+  const fCarSettings=carSettings.filter(cs=>!carSet||carSet.has(cs.car_name));
 
-  const REPORT_TABS=[["cars","🚗 Makina & Rezervime"],["finance","💰 Lëvizjet e Arkës"],["cli","👥 Klientët"],["docs","⏰ Skadimet"]];
+  const REPORT_TABS=[["cars","🚗 Makina & Rezervime"],["finance","💰 Lëvizjet e Arkës"],["cli","👥 Klientët"],["docs","⏰ Skadimet"],["deposits","🔒 Depozitat"]];
 
   return (
     <div style={{padding:14,display:"flex",gap:16,alignItems:"flex-start"}}>
-      {/* SIDEBAR */}
-      <div style={{width:170,flexShrink:0,background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,overflow:"hidden",position:"sticky",top:14}}>
+      {/* SIDEBAR - filtrat hapen direkt poshte tab-it aktiv */}
+      <div style={{width:250,flexShrink:0,background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,overflow:"hidden",position:"sticky",top:14}}>
         {REPORT_TABS.map(([id,lb])=>(
-          <div key={id} onClick={()=>chTab(id)} style={{
-            padding:"12px 14px",fontSize:13,fontWeight:700,cursor:"pointer",
-            background:tab===id?"#eff6ff":"#fff",color:tab===id?"#1d4ed8":"#374151",
-            borderLeft:tab===id?"3px solid #1d4ed8":"3px solid transparent",
-            borderBottom:"1px solid #f1f5f9"
-          }}>{lb}</div>
+          <div key={id}>
+            <div onClick={()=>chTab(id)} style={{
+              padding:"12px 14px",fontSize:13,fontWeight:700,cursor:"pointer",
+              background:tab===id?"#eff6ff":"#fff",color:tab===id?"#1d4ed8":"#374151",
+              borderLeft:tab===id?"3px solid #1d4ed8":"3px solid transparent",
+              borderBottom:"1px solid #f1f5f9",
+              display:"flex",alignItems:"center",justifyContent:"space-between",gap:6
+            }}>
+              <span>{lb}</span>
+              <span style={{fontSize:10,color:"#94a3b8"}}>{filtersOpen===id?"▾":"▸"}</span>
+            </div>
+
+            {filtersOpen===id&&(
+              <div style={{padding:"12px 14px",background:"#f8fafc",borderBottom:"1px solid #e2e8f0",display:"flex",flexDirection:"column",gap:10}}>
+                <div>
+                  <label style={{fontSize:11,fontWeight:700,color:"#64748b",display:"block",marginBottom:3}}>Nga data</label>
+                  <DateInput value={dFrom} onChange={chFrom}/>
+                </div>
+                <div>
+                  <label style={{fontSize:11,fontWeight:700,color:"#64748b",display:"block",marginBottom:3}}>Deri</label>
+                  <DateInput value={dTo} onChange={chTo}/>
+                </div>
+                {tab==="cli"&&(
+                  <div>
+                    <label style={{fontSize:11,fontWeight:700,color:"#64748b",display:"block",marginBottom:3}}>Klienti (bosh = të gjithë)</label>
+                    <select value={selClient} onChange={e=>chClient(e.target.value)} style={FL}>
+                      <option value="">👥 Të gjithë klientët</option>
+                      {clients.map(c=><option key={c.id} value={c.name}>{c.name}{c.phone?" · "+c.phone:""}</option>)}
+                    </select>
+                  </div>
+                )}
+                <div>
+                  <label style={{fontSize:11,fontWeight:700,color:"#64748b",display:"block",marginBottom:3}}>Makinat (bosh = të gjitha)</label>
+                  <CarMultiPicker cars={cars} selected={selCars} onChange={chCars}/>
+                </div>
+                {tab==="docs"&&(
+                  <div>
+                    <label style={{fontSize:11,fontWeight:700,color:"#64748b",display:"block",marginBottom:5}}>Lloji i shërbimit</label>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                      {[["sigurim","🛡️ Sigurim"],["kasko","🚙 Kasko"],["kolaudim","🔍 Kolaudim"],["taksa","💼 Taksa"],["vaj_filtra","🛢️ Vaj/Filtra"]].map(([t,lb2])=>(
+                        <button key={t} onClick={()=>chDocType(t)} style={{
+                          border:"1px solid "+(selDocTypes.includes(t)?"#1d4ed8":"#e2e8f0"),borderRadius:20,padding:"5px 10px",
+                          fontSize:11,fontWeight:700,cursor:"pointer",
+                          background:selDocTypes.includes(t)?"#eff6ff":"#fff",color:selDocTypes.includes(t)?"#1d4ed8":"#64748b"
+                        }}>{lb2}</button>
+                      ))}
+                    </div>
+                    {selDocTypes.length>0&&<button onClick={()=>{setSelDocTypes([]);setShown(false);}} style={{border:"none",background:"none",color:"#dc2626",fontSize:11,fontWeight:600,cursor:"pointer",marginTop:5,padding:0}}>✕ Pastro llojet</button>}
+                  </div>
+                )}
+                <button onClick={()=>setShown(true)} style={{...PB,fontSize:13,padding:"9px 0",width:"100%"}}>🔍 Shfaq Raportin</button>
+              </div>
+            )}
+          </div>
         ))}
       </div>
 
@@ -1802,7 +2026,7 @@ function RptPage({sess,reloadTick}) {
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,flexWrap:"wrap"}}>
           <h2 style={{margin:0,fontSize:17,fontWeight:700,color:"#0f172a"}}>📈 Raportet</h2>
           <div style={{flex:1}}/>
-          {tab!=="docs"&&(
+          {tab!=="docs"&&tab!=="deposits"&&(
             <div style={{display:"flex",background:"#f1f5f9",borderRadius:9,padding:3}}>
               {[["summary","📊 Përmbledhje"],["detail","📋 Analitikë"]].map(([v,l])=>(
                 <button key={v} onClick={()=>chView(v)} style={{
@@ -1814,50 +2038,14 @@ function RptPage({sess,reloadTick}) {
           )}
         </div>
 
-        {/* FILTERS */}
-        <div style={{display:"grid",gridTemplateColumns:tab==="cli"?"1fr 1fr 1fr 1fr":"1fr 1fr 2fr",gap:10,marginBottom:12,background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:12}}>
-          <div>
-            <label style={{fontSize:11,fontWeight:700,color:"#64748b",display:"block",marginBottom:3}}>Nga data</label>
-            <DateInput value={dFrom} onChange={chFrom}/>
-          </div>
-          <div>
-            <label style={{fontSize:11,fontWeight:700,color:"#64748b",display:"block",marginBottom:3}}>Deri</label>
-            <DateInput value={dTo} onChange={chTo}/>
-          </div>
-          {tab!=="cli"&&(
-            <div>
-              <label style={{fontSize:11,fontWeight:700,color:"#64748b",display:"block",marginBottom:3}}>Makinat (bosh = të gjitha)</label>
-              <CarMultiPicker cars={cars} selected={selCars} onChange={chCars}/>
-            </div>
-          )}
-          {tab==="cli"&&(
-            <>
-              <div>
-                <label style={{fontSize:11,fontWeight:700,color:"#64748b",display:"block",marginBottom:3}}>Klienti (bosh = të gjithë)</label>
-                <select value={selClient} onChange={e=>chClient(e.target.value)} style={FL}>
-                  <option value="">👥 Të gjithë klientët</option>
-                  {clients.map(c=><option key={c.id} value={c.name}>{c.name}{c.phone?" · "+c.phone:""}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={{fontSize:11,fontWeight:700,color:"#64748b",display:"block",marginBottom:3}}>Makinat (bosh = të gjitha)</label>
-                <CarMultiPicker cars={cars} selected={selCars} onChange={chCars}/>
-              </div>
-            </>
-          )}
-        </div>
-
-        <div style={{display:"flex",justifyContent:"flex-end",marginBottom:16}}>
-          <button onClick={()=>setShown(true)} style={{...PB,fontSize:13,padding:"9px 20px"}}>🔍 Shfaq Raportin</button>
-        </div>
-
         {!shown
-          ? <div style={{textAlign:"center",color:"#94a3b8",padding:60,background:"#fff",borderRadius:12,border:"1px dashed #cbd5e1"}}>Zgjidh filtrat dhe kliko <strong>"🔍 Shfaq Raportin"</strong> për ta parë.</div>
+          ? <div style={{textAlign:"center",color:"#94a3b8",padding:60,background:"#fff",borderRadius:12,border:"1px dashed #cbd5e1"}}>Zgjidh filtrat anash dhe kliko <strong>"🔍 Shfaq Raportin"</strong> për ta parë.</div>
           : <>
               {tab==="cars"&&<CarsReport cars={cars} reses={fReses} exps={fExps} view={view}/>}
               {tab==="finance"&&<FinanceReport cars={cars} ledger={fLedger} reses={reses} view={view}/>}
               {tab==="cli"&&<ClientsReport clients={clients} reses={fReses} selClient={selClient} view={view}/>}
-              {tab==="docs"&&<DocsReport cars={cars} services={fSrvs}/>}
+              {tab==="docs"&&<DocsReport cars={cars} services={fSrvs} carSettings={fCarSettings} reses={reses} selTypes={selDocTypes}/>}
+              {tab==="deposits"&&<DepositsReport cars={cars} ledger={fLedger} reses={reses}/>}
             </>
         }
       </div>
@@ -2120,9 +2308,8 @@ function ClientsReport({clients,reses,selClient,view}){
   );
 }
 
-function DocsReport({cars,services}){
-  const TYPE_LB={sigurim:"🛡️ Sigurim",kasko:"🚙 Kasko",kolaudim:"🔍 Kolaudim",taksa:"💼 Taksa"};
-  const [selTypes,setSelTypes]=useState([]);
+function DocsReport({cars,services,carSettings,reses,selTypes}){
+  const TYPE_LB={sigurim:"🛡️ Sigurim",kasko:"🚙 Kasko",kolaudim:"🔍 Kolaudim",taksa:"💼 Taksa",vaj_filtra:"🛢️ Vaj/Filtra"};
   function daysUntil(dateStr){
     const d=new Date(dateStr); d.setHours(0,0,0,0);
     const t=new Date(); t.setHours(0,0,0,0);
@@ -2135,50 +2322,64 @@ function DocsReport({cars,services}){
     if(days<=30) return {bg:"#fef9c3",bd:"#fef08a",tx:"#713f12",lb:days+" ditë"};
     return {bg:"#f0fdf4",bd:"#bbf7d0",tx:"#166534",lb:days+" ditë"};
   }
-  function toggleType(t){ setSelTypes(s=>s.includes(t)?s.filter(x=>x!==t):[...s,t]); }
-  const docs=services
-    .filter(s=>TYPE_LB[s.type]&&(selTypes.length===0||selTypes.includes(s.type)))
-    .map(s=>({...s,daysLeft:daysUntil(s.expiry_date)}))
+  function currentKm(cn){
+    const vals=(reses||[]).filter(r=>r.car_name===cn&&r.km_in).map(r=>Number(r.km_in));
+    return vals.length?Math.max(...vals):0;
+  }
+
+  const dateDocs=services
+    .filter(s=>TYPE_LB[s.type]&&s.type!=="vaj_filtra")
+    .map(s=>({...s,kind:"date",daysLeft:daysUntil(s.expiry_date)}));
+
+  const oilDocs=(carSettings||[])
+    .filter(cs=>cs.oil_interval_km&&cs.last_oil_km!==null&&cs.last_oil_km!==undefined)
+    .map(cs=>{
+      const curKm=currentKm(cs.car_name)||Number(cs.last_oil_km);
+      const nextChangeKm=Number(cs.last_oil_km)+Number(cs.oil_interval_km);
+      const kmLeft=nextChangeKm-curKm;
+      return {
+        id:"oil_"+cs.id, car_name:cs.car_name, type:"vaj_filtra",
+        kind:"km", kmLeft, curKm, nextChangeKm,
+        daysLeft:Math.round(kmLeft/500), // ekuivalent per renditje/urgjence te njesuar
+        notes:"Km aktual: "+curKm.toLocaleString()+" · Ndërrimi te: "+nextChangeKm.toLocaleString()+" km"
+      };
+    });
+
+  const docs=[...dateDocs,...oilDocs]
+    .filter(s=>!selTypes||selTypes.length===0||selTypes.includes(s.type))
     .sort((a,b)=>a.daysLeft-b.daysLeft);
 
   function doExport(){
     exportToExcel(docs.map(s=>({
       Makina:carLabel(s.car_name,cars),Lloji:TYPE_LB[s.type],
-      "Data e Skadimit":fmtFull(s.expiry_date),
-      Status:s.daysLeft<0?"Skaduar":s.daysLeft+" ditë",
+      "Data e Skadimit / Km":s.kind==="date"?fmtFull(s.expiry_date):(s.nextChangeKm.toLocaleString()+" km"),
+      Status:s.kind==="date"?(s.daysLeft<0?"Skaduar":s.daysLeft+" ditë"):(s.kmLeft<0?"Kaluar "+Math.abs(s.kmLeft).toLocaleString()+" km":s.kmLeft.toLocaleString()+" km mbetur"),
       Shenime:s.notes||""
     })),"Skadimet_Dokumenteve.xlsx","Skadimet");
   }
 
   return (
     <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:8}}>
-        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-          {Object.entries(TYPE_LB).map(([t,lb])=>(
-            <button key={t} onClick={()=>toggleType(t)} style={{
-              border:"1px solid "+(selTypes.includes(t)?"#1d4ed8":"#e2e8f0"),borderRadius:20,padding:"6px 12px",
-              fontSize:12,fontWeight:700,cursor:"pointer",
-              background:selTypes.includes(t)?"#eff6ff":"#fff",color:selTypes.includes(t)?"#1d4ed8":"#64748b"
-            }}>{lb}</button>
-          ))}
-          {selTypes.length>0&&<button onClick={()=>setSelTypes([])} style={{border:"none",background:"none",color:"#dc2626",fontSize:12,fontWeight:600,cursor:"pointer"}}>✕ Pastro</button>}
-        </div>
+      <div style={{display:"flex",justifyContent:"flex-end",marginBottom:10}}>
         <button onClick={doExport} style={{...PB,background:"#059669",fontSize:12,padding:"7px 14px"}}>📥 Shkarko Excel</button>
       </div>
       <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,overflow:"hidden"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
           <thead><tr style={{background:"#f8fafc"}}>
-            {["Makina","Lloji","Data e Skadimit","Gjendja","Shënime"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:11,color:"#64748b",fontWeight:700,borderBottom:"2px solid #e2e8f0"}}>{h}</th>)}
+            {["Makina","Lloji","Data e Skadimit / Km","Gjendja","Shënime"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:11,color:"#64748b",fontWeight:700,borderBottom:"2px solid #e2e8f0"}}>{h}</th>)}
           </tr></thead>
           <tbody>
             {docs.map(s=>{
               const u=urg(s.daysLeft);
+              const gjendja=s.kind==="date"
+                ? u.lb
+                : (s.kmLeft<0?("kaluar "+Math.abs(s.kmLeft).toLocaleString()+" km"):(s.kmLeft.toLocaleString()+" km mbetur"));
               return (
                 <tr key={s.id} style={{borderBottom:"1px solid #f1f5f9"}}>
                   <td style={{padding:"7px 10px",fontWeight:700}}>{carLabel(s.car_name,cars)}</td>
                   <td style={{padding:"7px 10px"}}>{TYPE_LB[s.type]}</td>
-                  <td style={{padding:"7px 10px"}}>{fmtFull(s.expiry_date)}</td>
-                  <td style={{padding:"7px 10px"}}><span style={{padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:700,background:u.bg,color:u.tx,border:"1px solid "+u.bd}}>{u.lb}</span></td>
+                  <td style={{padding:"7px 10px"}}>{s.kind==="date"?fmtFull(s.expiry_date):(s.nextChangeKm.toLocaleString()+" km")}</td>
+                  <td style={{padding:"7px 10px"}}><span style={{padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:700,background:u.bg,color:u.tx,border:"1px solid "+u.bd}}>{gjendja}</span></td>
                   <td style={{padding:"7px 10px",color:"#64748b"}}>{s.notes||"-"}</td>
                 </tr>
               );
@@ -2191,8 +2392,82 @@ function DocsReport({cars,services}){
   );
 }
 
+function DepositsReport({cars,ledger,reses}){
+  const resById={}; reses.forEach(r=>{resById[r.id]=r;});
+  const depTx=ledger.filter(l=>l.type==="deposit_in"||l.type==="deposit_out");
+  const groups={};
+  depTx.forEach(l=>{
+    const rid=l.reference_id;
+    if(!rid) return;
+    if(!groups[rid]) groups[rid]={reservation:resById[rid],held:0,totalTaken:0,currency:l.currency,taken:null,returned:null};
+    groups[rid].held += Number(l.amount);
+    if(l.type==="deposit_in"){
+      groups[rid].totalTaken += Number(l.amount);
+      if(!groups[rid].taken||l.created_at<groups[rid].taken) groups[rid].taken=l.created_at;
+    }
+    if(l.type==="deposit_out") groups[rid].returned=l.created_at;
+  });
+  const rows=Object.values(groups).filter(g=>g.reservation).sort((a,b)=>(b.taken||"").localeCompare(a.taken||""));
+
+  function doExport(){
+    exportToExcel(rows.map(g=>({
+      Klienti:g.reservation.client_name,Makina:carLabel(g.reservation.car_name,cars),
+      Shuma:g.totalTaken,
+      Valuta:g.currency,
+      "Marrë më":g.taken?fmtFull(g.taken.slice(0,10)):"",
+      "Kthyer më":g.returned?fmtFull(g.returned.slice(0,10)):"",
+      Status:g.held>0.01?"Mbajtur":"Kthyer"
+    })),"Depozitat.xlsx","Depozitat");
+  }
+
+  const totalHeld={};
+  rows.forEach(g=>{ if(g.held>0.01){ totalHeld[g.currency]=(totalHeld[g.currency]||0)+g.held; } });
+
+  return (
+    <div>
+      <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+        {Object.entries(totalHeld).map(([cur,amt])=>(
+          <div key={cur} style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:10,padding:"10px 16px"}}>
+            <div style={{fontSize:10,color:"#1e40af",fontWeight:700}}>TOTALI I MBAJTUR ({cur})</div>
+            <div style={{fontSize:18,fontWeight:800,color:"#1e40af"}}>{fmtM(amt,cur)}</div>
+          </div>
+        ))}
+        <div style={{flex:1}}/>
+        <button onClick={doExport} style={{...PB,background:"#059669",fontSize:12,padding:"7px 14px"}}>📥 Shkarko Excel</button>
+      </div>
+      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,overflow:"hidden"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <thead><tr style={{background:"#f8fafc"}}>
+            {["Klienti","Makina","Shuma","Marrë më","Kthyer më","Status"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:11,color:"#64748b",fontWeight:700,borderBottom:"2px solid #e2e8f0"}}>{h}</th>)}
+          </tr></thead>
+          <tbody>
+            {rows.map((g,i)=>{
+              const isHeld=g.held>0.01;
+              return (
+                <tr key={i} style={{borderBottom:"1px solid #f1f5f9"}}>
+                  <td style={{padding:"7px 10px",fontWeight:700}}>{g.reservation.client_name}</td>
+                  <td style={{padding:"7px 10px"}}>{carLabel(g.reservation.car_name,cars)}</td>
+                  <td style={{padding:"7px 10px",fontWeight:700}}>{fmtM(g.totalTaken,g.currency)}</td>
+                  <td style={{padding:"7px 10px"}}>{g.taken?fmtFull(g.taken.slice(0,10)):"-"}</td>
+                  <td style={{padding:"7px 10px"}}>{g.returned?fmtFull(g.returned.slice(0,10)):"-"}</td>
+                  <td style={{padding:"7px 10px"}}>
+                    <span style={{padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:700,background:isHeld?"#eff6ff":"#f0fdf4",color:isHeld?"#1e40af":"#166534",border:"1px solid "+(isHeld?"#bfdbfe":"#bbf7d0")}}>
+                      {isHeld?"🔒 Mbajtur":"✅ Kthyer"}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+            {rows.length===0&&<tr><td colSpan={6} style={{padding:20,textAlign:"center",color:"#94a3b8"}}>Nuk ka depozita për këtë filtër.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function FinanceReport({cars,ledger,reses,view}){
-  const TYPE_LB={payment:"💵 Pagesë",manual_in:"➕ Hyrje Manuale",expense:"📤 Shpenzim",manual_out:"➖ Dalje Manuale",transfer:"🔄 Transfertë"};
+  const TYPE_LB={payment:"💵 Pagesë",manual_in:"➕ Hyrje Manuale",expense:"📤 Shpenzim",manual_out:"➖ Dalje Manuale",transfer:"🔄 Transfertë",deposit_in:"🔒 Depozitë Marrë",deposit_out:"↩️ Depozitë Kthyer"};
   if(view==="detail"){
     const sorted=[...ledger].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
     return (
@@ -2264,40 +2539,54 @@ function SrvPage({sess,reload,reloadTick,addLog}) {
   const [cars,setCars]=useState([]);
   const [services,setServices]=useState([]);
   const [reses,setReses]=useState([]);
+  const [carSettings,setCarSettings]=useState([]);
   const [loading,setLoading]=useState(true);
+  const [err,setErr]=useState("");
   const [selCar,setSelCar]=useState("");
+  const [srch,setSrch]=useState("");
   const [showSrvF,setShowSrvF]=useState(false);
   const [editSrv,setEditSrv]=useState(null);
   const [sf,setSf]=useState({car_name:"",type:"sigurim",expiry_date:"",done_date:"",notes:""});
+  const [showOilF,setShowOilF]=useState(false);
+  const [oilF,setOilF]=useState({last_oil_km:"",oil_interval_km:"15000",last_oil_date:""});
   const [importingDocs,setImportingDocs]=useState(false);
   const [importDocsMsg,setImportDocsMsg]=useState("");
   const docsFileRef=useRef(null);
 
   const SRV_TYPES={"sigurim":"🛡️ Sigurim","kasko":"🚙 Kasko","kolaudim":"🔍 Kolaudim","taksa":"💼 Taksa"};
   const DAYS_WARN=[30,15,7,5];
+  const KM_WARN=[2000,1000,500,200];
 
   useEffect(()=>{
-    setLoading(true);
+    setLoading(true); setErr("");
     Promise.all([
       sbAuthGet("cars","order=sort_order.asc",sess.token),
       sbAuthGet("car_services","order=created_at.desc",sess.token),
-      sbAuthGet("reservations","status=neq.Anuluar",sess.token)
-    ]).then(([c,s,r])=>{
-      setCars(c);setServices(s);setReses(r);
-      if(!selCar&&c.length>0) setSelCar(c[0].name);
+      sbAuthGet("reservations","",sess.token),
+      sbAuthGet("car_settings","",sess.token)
+    ]).then(([c,s,r,cset])=>{
+      const activeCars=c.filter(x=>x.active!==false);
+      setCars(activeCars);setServices(s);setReses(r);setCarSettings(cset);
+      if(!selCar&&activeCars.length>0) setSelCar(activeCars[0].name);
       setLoading(false);
-      checkSrvNotifs(s);
-    }).catch(()=>setLoading(false));
+      try { checkSrvNotifs(s,cset,r); } catch(e){ console.error("checkSrvNotifs error:",e); }
+    }).catch(e=>{ setErr(e.message||String(e)); setLoading(false); });
   },[reloadTick,sess.token]);
 
-  function checkSrvNotifs(svcs){
+  function currentKm(cn){
+    const vals=reses.filter(r=>r.car_name===cn&&r.km_in).map(r=>Number(r.km_in));
+    return vals.length?Math.max(...vals):0;
+  }
+
+  function checkSrvNotifs(svcs,csets,resesList){
     if(!("Notification" in window)||Notification.permission!=="granted") return;
     const today=new Date(); today.setHours(0,0,0,0);
     const sent=JSON.parse(localStorage.getItem("crm_srv_notifs")||"{}");
-    svcs.forEach(s=>{
+    // Njoftime sipas date (Sigurim/Kasko/Kolaudim/Taksa)
+    svcs.filter(s=>SRV_TYPES[s.type]).forEach(s=>{
       const exp=new Date(s.expiry_date); exp.setHours(0,0,0,0);
       const daysLeft=Math.round((exp-today)/86400000);
-      const label=SRV_TYPES[s.type]||"🛢️ Vaj/Filtra";
+      const label=SRV_TYPES[s.type];
       DAYS_WARN.forEach(d=>{
         const key=s.id+"_"+d;
         if(daysLeft===d&&!sent[key]){
@@ -2311,6 +2600,30 @@ function SrvPage({sess,reload,reloadTick,addLog}) {
         if(!sent[dailyKey]){
           const lbl=daysLeft<0?("SKADUAR prej "+Math.abs(daysLeft)+" ditë!"):daysLeft===0?"SKADON SOT!":("mbetën "+daysLeft+" ditë");
           new Notification("🚨 "+label+" - "+lbl,{body:s.car_name+" · "+s.expiry_date});
+          sent[dailyKey]=true;
+        }
+      }
+    });
+    // Njoftime KM per Vaj/Filtra
+    csets.forEach(cset=>{
+      if(!cset.oil_interval_km||cset.last_oil_km===null||cset.last_oil_km===undefined) return;
+      const vals=resesList.filter(r=>r.car_name===cset.car_name&&r.km_in).map(r=>Number(r.km_in));
+      const curKm=vals.length?Math.max(...vals):Number(cset.last_oil_km);
+      const nextChangeKm=Number(cset.last_oil_km)+Number(cset.oil_interval_km);
+      const kmLeft=nextChangeKm-curKm;
+      KM_WARN.forEach(k=>{
+        const key=cset.car_name+"_oilkm_"+k;
+        if(kmLeft<=k&&kmLeft>k-500&&!sent[key]){
+          new Notification("🛢️ Vaj/Filtra afër ndërrimit — "+cset.car_name,{body:"Edhe ~"+Math.max(0,kmLeft).toLocaleString()+" km deri ndërrimit"});
+          sent[key]=true;
+        }
+      });
+      if(kmLeft<=200){
+        const todayStr=today.toISOString().slice(0,10);
+        const dailyKey=cset.car_name+"_oilkm_daily_"+todayStr;
+        if(!sent[dailyKey]){
+          const lbl=kmLeft<0?("KALUAR me "+Math.abs(kmLeft).toLocaleString()+" km!"):("edhe "+kmLeft.toLocaleString()+" km");
+          new Notification("🚨 Vaj/Filtra — "+cset.car_name+" — "+lbl,{body:"Km aktual: "+curKm.toLocaleString()+" · Ndërrimi te: "+nextChangeKm.toLocaleString()});
           sent[dailyKey]=true;
         }
       }
@@ -2339,6 +2652,20 @@ function SrvPage({sess,reload,reloadTick,addLog}) {
     await sbAuthDelete("car_services",id,sess.token);
     addLog("Fshi Servis","");
     reload();
+  }
+  async function saveOilSettings(){
+    if(!oilF.last_oil_km||!oilF.oil_interval_km){ alert("Duhet të vendosësh km e ndërrimit dhe intervalin."); return; }
+    try {
+      const existing=carSettings.find(cs=>cs.car_name===selCar);
+      const body={car_name:selCar,last_oil_km:Number(oilF.last_oil_km),oil_interval_km:Number(oilF.oil_interval_km),last_oil_date:oilF.last_oil_date||null};
+      if(existing){
+        await sbAuthPatch("car_settings",existing.id,body,sess.token);
+      } else {
+        await sbAuthPost("car_settings",body,sess.token);
+      }
+      addLog("Vendos Vaj/Filtra (Km)",selCar+" @ "+oilF.last_oil_km+" km");
+      reload(); setShowOilF(false);
+    } catch(e){ alert("Gabim: "+e.message); }
   }
 
   const DOC_COLS=[["sigurim","Sigurim - Skadimi"],["kasko","Kasko - Skadimi"],["kolaudim","Kolaudim - Skadimi"],["taksa","Taksa - Skadimi"]];
@@ -2414,21 +2741,29 @@ function SrvPage({sess,reload,reloadTick,addLog}) {
 
   const carNames=cars.map(c=>c.name);
   if(loading) return <Spin/>;
+  if(err) return <Err msg={err} onRetry={()=>{setErr("");reload();}}/>;
 
   // Statusi më urgjent për një makinë (për pamjen e flotës)
+  // Statusi më urgjent për një makinë (për pamjen e flotës) - dite deri skadim minimale, ose km-ekuivalent per vaj
   function worstStatus(cn){
-    const docs=services.filter(s=>s.car_name===cn&&(s.type==="sigurim"||s.type==="kolaudim"||s.type==="taksa"));
-    const oilLatest=services.filter(s=>s.car_name===cn&&s.type==="vaj_filtra").sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0];
-    const all=[...docs,...(oilLatest?[oilLatest]:[])];
-    if(!all.length) return null;
+    const docs=services.filter(s=>s.car_name===cn&&SRV_TYPES[s.type]);
     let worst=null;
-    all.forEach(s=>{ const d=daysUntil(s.expiry_date); if(worst===null||d<worst) worst=d; });
+    docs.forEach(s=>{ const d=daysUntil(s.expiry_date); if(worst===null||d<worst) worst=d; });
+    const cset=carSettings.find(cs=>cs.car_name===cn);
+    if(cset&&cset.oil_interval_km&&cset.last_oil_km!==null&&cset.last_oil_km!==undefined){
+      const curKm=currentKm(cn)||Number(cset.last_oil_km);
+      const kmLeft=(Number(cset.last_oil_km)+Number(cset.oil_interval_km))-curKm;
+      // konverto km ne "ditë-ekuivalente" per krahasim urgjence (500km ~ 1 "ditë" urgjence)
+      const kmAsDays=Math.round(kmLeft/500);
+      if(worst===null||kmAsDays<worst) worst=kmAsDays;
+    }
     return worst;
   }
 
-  const selDocs=services.filter(s=>s.car_name===selCar&&(s.type==="sigurim"||s.type==="kolaudim"||s.type==="taksa"));
-  const selOilHistory=services.filter(s=>s.car_name===selCar&&s.type==="vaj_filtra").sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
-  const selOilCurrent=selOilHistory[0];
+  const filteredCars=cars.filter(c=>!srch||(c.targa||"").toLowerCase().includes(srch.toLowerCase())||(c.model||c.name||"").toLowerCase().includes(srch.toLowerCase()));
+  const selDocs=services.filter(s=>s.car_name===selCar&&SRV_TYPES[s.type]);
+  const selOilSetting=carSettings.find(cs=>cs.car_name===selCar);
+  const selCurKm=selCar?currentKm(selCar):0;
 
   return (
     <div style={{padding:14,maxWidth:1000,margin:"0 auto"}}>
@@ -2445,9 +2780,11 @@ function SrvPage({sess,reload,reloadTick,addLog}) {
       </div>
       {importDocsMsg&&<div style={{marginBottom:14,padding:"8px 12px",borderRadius:8,fontSize:12,fontWeight:600,background:importDocsMsg.startsWith("✅")?"#dcfce7":"#fee2e2",color:importDocsMsg.startsWith("✅")?"#166534":"#991b1b"}}>{importDocsMsg}</div>}
 
+      <input value={srch} onChange={e=>setSrch(e.target.value)} placeholder="🔍 Kërko makinën me targë ose model..." style={{...FL,marginBottom:14}}/>
+
       {/* Pamja e flotës — kush ka nevojë për vëmendje */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(110px,1fr))",gap:8,marginBottom:18}}>
-        {cars.map(car=>{
+        {filteredCars.map(car=>{
           const worst=worstStatus(car.name);
           const urg=worst===null?{bg:"#f8fafc",bd:"#e2e8f0",tx:"#94a3b8"}:urgencyColor(worst);
           const sel=selCar===car.name;
@@ -2470,11 +2807,10 @@ function SrvPage({sess,reload,reloadTick,addLog}) {
           <div style={{background:"#0f172a",padding:"12px 16px",display:"flex",alignItems:"center",gap:10}}>
             <span style={{fontWeight:800,fontSize:15,color:"#fff",flex:1}}>{carLabel(selCar,cars)}</span>
             <button onClick={()=>{setSf({car_name:selCar,type:"sigurim",expiry_date:"",done_date:"",notes:""});setEditSrv(null);setShowSrvF(true)}} style={{...PB,fontSize:12,padding:"6px 12px"}}>+ Dokument</button>
-            <button onClick={()=>{setSf({car_name:selCar,type:"vaj_filtra",expiry_date:"",done_date:todayY(),notes:""});setEditSrv(null);setShowSrvF(true)}} style={{...PB,background:"#7c3aed",fontSize:12,padding:"6px 12px"}}>🛢️ Ndërrim Vaji</button>
           </div>
 
           <div style={{padding:16}}>
-            {/* Dokumentet: Sigurim / Kolaudim / Taksa */}
+            {/* Dokumentet: Sigurim / Kasko / Kolaudim / Taksa */}
             <h3 style={{margin:"0 0 10px",fontSize:13,fontWeight:700,color:"#374151"}}>📄 Dokumentet</h3>
             {Object.entries(SRV_TYPES).map(([type,label])=>{
               const srv=selDocs.find(s=>s.type===type);
@@ -2494,56 +2830,68 @@ function SrvPage({sess,reload,reloadTick,addLog}) {
               );
             })}
 
-            {/* Vaj/Filtra - historik i plotë */}
-            <h3 style={{margin:"18px 0 10px",fontSize:13,fontWeight:700,color:"#374151"}}>🛢️ Vaj & Filtra — Historiku</h3>
-            {selOilCurrent&&(()=>{
-              const days=daysUntil(selOilCurrent.expiry_date);
-              const urg=urgencyColor(days);
-              return (
-                <div style={{background:urg.bg,border:"1px solid "+urg.bd,borderRadius:10,padding:"10px 14px",marginBottom:10}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <span style={{fontWeight:700,fontSize:13,color:urg.tx}}>🔔 Ndërrimi tjetër duhet bërë</span>
-                    <span style={{padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:700,background:"#fff",color:urg.tx,border:"1px solid "+urg.bd}}>{days<0?"Skaduar":days+"d"}</span>
-                  </div>
-                  <div style={{fontSize:12,color:urg.tx,marginTop:3}}>{fmtFull(selOilCurrent.expiry_date)}</div>
-                </div>
-              );
-            })()}
-            {selOilHistory.length===0
-              ? <div style={{fontSize:12,color:"#94a3b8",padding:"10px 0"}}>Asnjë ndërrim i regjistruar ende.</div>
-              : selOilHistory.map(s=>(
-                <div key={s.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid #f1f5f9"}}>
-                  <span style={{fontSize:16,flexShrink:0}}>🛢️</span>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:12,fontWeight:600,color:"#374151"}}>
-                      {s.done_date?"Bërë më "+fmtFull(s.done_date):"Regjistruar "+fmtFull(s.created_at?.slice(0,10))} → Tjetri: {fmtFull(s.expiry_date)}
+            {/* Vaj/Filtra - bazuar ne KM */}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",margin:"18px 0 10px"}}>
+              <h3 style={{margin:0,fontSize:13,fontWeight:700,color:"#374151"}}>🛢️ Vaj & Filtra (sipas Km)</h3>
+              <button onClick={()=>{setOilF({last_oil_km:selOilSetting?.last_oil_km||"",oil_interval_km:selOilSetting?.oil_interval_km||"15000",last_oil_date:selOilSetting?.last_oil_date||""});setShowOilF(true)}} style={{...IB,fontSize:12}}>{selOilSetting?"✏️ Ndrysho":"➕ Vendos"}</button>
+            </div>
+            {!selOilSetting
+              ? <div style={{fontSize:12,color:"#94a3b8",padding:"10px 0"}}>Nuk është vendosur ende km e ndërrimit të fundit. Kliko "➕ Vendos".</div>
+              : (()=>{
+                  const nextChangeKm=Number(selOilSetting.last_oil_km)+Number(selOilSetting.oil_interval_km);
+                  const kmLeft=nextChangeKm-selCurKm;
+                  const kmAsDays=Math.round(kmLeft/500);
+                  const urg=urgencyColor(kmAsDays);
+                  return (
+                    <div style={{background:urg.bg,border:"1px solid "+urg.bd,borderRadius:10,padding:"12px 14px"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                        <span style={{fontWeight:700,fontSize:13,color:urg.tx}}>{kmLeft<0?"🚨 Ndërrimi ka KALUAR":"🔔 Ndërrimi tjetër"}</span>
+                        <span style={{padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:700,background:"#fff",color:urg.tx,border:"1px solid "+urg.bd}}>
+                          {kmLeft<0?("kaluar "+Math.abs(kmLeft).toLocaleString()+" km"):(kmLeft.toLocaleString()+" km mbetur")}
+                        </span>
+                      </div>
+                      <div style={{fontSize:12,color:urg.tx,lineHeight:1.8}}>
+                        Km aktual (nga marrja e fundit): <strong>{selCurKm.toLocaleString()}</strong><br/>
+                        Ndërrimi i fundit u bë në: <strong>{Number(selOilSetting.last_oil_km).toLocaleString()} km</strong>{selOilSetting.last_oil_date?" ("+fmtFull(selOilSetting.last_oil_date)+")":""}<br/>
+                        Intervali: çdo <strong>{Number(selOilSetting.oil_interval_km).toLocaleString()} km</strong> → ndërrimi tjetër te <strong>{nextChangeKm.toLocaleString()} km</strong>
+                      </div>
                     </div>
-                    {s.notes&&<div style={{fontSize:11,color:"#94a3b8"}}>{s.notes}</div>}
-                  </div>
-                  <button onClick={()=>{setSf({car_name:selCar,type:"vaj_filtra",expiry_date:s.expiry_date,done_date:s.done_date||"",notes:s.notes||""});setEditSrv(s.id);setShowSrvF(true)}} style={{...IB,fontSize:12}}>✏️</button>
-                  <button onClick={()=>delSrv(s.id)} style={{...IB,color:"#dc2626",fontSize:12}}>🗑️</button>
-                </div>
-              ))
+                  );
+                })()
             }
           </div>
         </div>
       )}
 
-      {/* Modal Shto/Ndrysho */}
-      {showSrvF&&<Modal title={editSrv?"Ndrysho":(sf.type==="vaj_filtra"?"🛢️ Ndërrim Vaji/Filtrash":"Shto Dokument")} onClose={()=>{setShowSrvF(false);setEditSrv(null);}}>
+      {/* Modal Shto/Ndrysho Dokument */}
+      {showSrvF&&<Modal title={editSrv?"Ndrysho Dokument":"Shto Dokument"} onClose={()=>{setShowSrvF(false);setEditSrv(null);}}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           <Fld label="Makina *" col2><CarPicker cars={cars} value={sf.car_name} onChange={car=>setSf(f=>({...f,car_name:car.name}))}/></Fld>
           <Fld label="Lloji"><select value={sf.type} onChange={e=>setSf(f=>({...f,type:e.target.value}))} style={FL}>
             {Object.entries(SRV_TYPES).map(([v,l])=><option key={v} value={v}>{l}</option>)}
-            <option value="vaj_filtra">🛢️ Vaj/Filtra</option>
           </select></Fld>
-          {sf.type==="vaj_filtra"&&<Fld label="Data e Kryerjes"><DateInput value={sf.done_date||""} onChange={v=>setSf(f=>({...f,done_date:v}))}/></Fld>}
-          <Fld label={sf.type==="vaj_filtra"?"Ndërrimi Tjetër Duhet Bërë *":"Data e Skadimit *"} col2={sf.type!=="vaj_filtra"}><DateInput value={sf.expiry_date} onChange={v=>setSf(f=>({...f,expiry_date:v}))}/></Fld>
-          <Fld label="Shënime" col2><input value={sf.notes||""} onChange={e=>setSf(f=>({...f,notes:e.target.value}))} style={FL} placeholder="p.sh. km në kryerje, tip vaji..."/></Fld>
+          <Fld label="Data e Skadimit *"><DateInput value={sf.expiry_date} onChange={v=>setSf(f=>({...f,expiry_date:v}))}/></Fld>
+          <Fld label="Shënime" col2><input value={sf.notes||""} onChange={e=>setSf(f=>({...f,notes:e.target.value}))} style={FL} placeholder="Opsionale..."/></Fld>
         </div>
         <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
           <button onClick={()=>{setShowSrvF(false);setEditSrv(null);}} style={CB}>Anulo</button>
           <button onClick={saveSrv} style={PB}>💾 Ruaj</button>
+        </div>
+      </Modal>}
+
+      {/* Modal Vaj/Filtra (Km) */}
+      {showOilF&&<Modal title={"🛢️ Vaj & Filtra — "+carLabel(selCar,cars)} onClose={()=>setShowOilF(false)}>
+        <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:8,padding:"10px 12px",marginBottom:14,fontSize:12,color:"#1e40af"}}>
+          ℹ️ Km aktual i kësaj makine (nga marrja e fundit e regjistruar): <strong>{selCurKm.toLocaleString()} km</strong>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <Fld label="Km i ndërrimit të fundit *"><input type="number" value={oilF.last_oil_km} onChange={e=>setOilF(f=>({...f,last_oil_km:e.target.value}))} style={FL} placeholder="p.sh. 128000"/></Fld>
+          <Fld label="Intervali (km) *"><input type="number" value={oilF.oil_interval_km} onChange={e=>setOilF(f=>({...f,oil_interval_km:e.target.value}))} style={FL} placeholder="15000"/></Fld>
+          <Fld label="Data e ndërrimit (opsionale)" col2><DateInput value={oilF.last_oil_date} onChange={v=>setOilF(f=>({...f,last_oil_date:v}))}/></Fld>
+        </div>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
+          <button onClick={()=>setShowOilF(false)} style={CB}>Anulo</button>
+          <button onClick={saveOilSettings} style={PB}>💾 Ruaj</button>
         </div>
       </Modal>}
     </div>
@@ -2712,8 +3060,13 @@ function SetPage({sess,reload,addLog}) {
       setCars(cs=>[...cs,c]); addLog("Shto Makinë",uniqueName); setNewCar(""); setNewCarTarga("");
     } catch(e){alert(e.message);}
   }
-  async function delCar(id,name){
-    try { await sbAuthDelete("cars",id,sess.token); setCars(cs=>cs.filter(c=>c.id!==id)); addLog("Fshi Makinë",name); } catch(e){alert(e.message);}
+  async function toggleCarActive(car){
+    try {
+      const newActive=!(car.active!==false);
+      await sbAuthPatch("cars",car.id,{active:newActive},sess.token);
+      setCars(cs=>cs.map(c=>c.id===car.id?{...c,active:newActive}:c));
+      addLog(newActive?"Aktivizo Makinë":"Pasivizo Makinë",car.name);
+    } catch(e){alert(e.message);}
   }
   async function uploadPhoto(car,file){
     if(!file) return;
@@ -2797,32 +3150,40 @@ function SetPage({sess,reload,addLog}) {
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:12}}>
             {cars.map(car=>{
               const cc=carColor(car.name,cars.map(c=>c.name));
-              return <div key={car.id} style={{background:"#fff",borderRadius:14,border:"2px solid "+cc.ac+"44",overflow:"hidden",boxShadow:"0 2px 10px rgba(0,0,0,0.07)"}}>
-                <div style={{position:"relative",height:120,background:car.photo_url?"#000":cc.bg,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+              const isActive=car.active!==false;
+              return <div key={car.id} style={{background:"#fff",borderRadius:14,border:"2px solid "+(isActive?cc.ac+"44":"#e2e8f0"),overflow:"hidden",boxShadow:"0 2px 10px rgba(0,0,0,0.07)",opacity:isActive?1:0.6}}>
+                <div style={{position:"relative",height:130,background:car.photo_url?"#000":cc.bg,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
                   {car.photo_url
-                    ? <img src={car.photo_url} alt={car.name} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                    ? <img src={car.photo_url} alt={car.name} style={{width:"100%",height:"100%",objectFit:"cover",filter:isActive?"none":"grayscale(1)"}}/>
                     : <div style={{fontSize:36,opacity:0.4}}>🚗</div>
                   }
-                  <label style={{position:"absolute",bottom:6,right:6,background:"rgba(0,0,0,0.65)",color:"#fff",borderRadius:7,padding:"4px 8px",fontSize:11,cursor:"pointer",fontWeight:600}}>
+                  {/* Mbulesë e errët poshtë per lexueshmeri te targes */}
+                  <div style={{position:"absolute",left:0,right:0,bottom:0,height:"55%",background:"linear-gradient(to top, rgba(0,0,0,0.75), rgba(0,0,0,0))"}}/>
+                  <div style={{position:"absolute",top:6,left:6,padding:"3px 9px",borderRadius:20,fontSize:10,fontWeight:800,background:isActive?"#dcfce7":"#f1f5f9",color:isActive?"#166534":"#64748b"}}>
+                    {isActive?"● AKTIVE":"○ PASIVE"}
+                  </div>
+                  <button onClick={()=>openEditCar(car)} style={{position:"absolute",top:6,right:6,background:"rgba(0,0,0,0.55)",border:"none",borderRadius:7,width:26,height:26,cursor:"pointer",color:"#fff",fontSize:13}}>✏️</button>
+                  <label style={{position:"absolute",bottom:6,right:6,background:"rgba(0,0,0,0.65)",color:"#fff",borderRadius:7,padding:"4px 8px",fontSize:11,cursor:"pointer",fontWeight:600,zIndex:2}}>
                     📷 Foto
                     <input type="file" accept="image/*" onChange={e=>uploadPhoto(car,e.target.files[0])} style={{display:"none"}}/>
                   </label>
+                  <div style={{position:"absolute",left:10,bottom:6,zIndex:1}}>
+                    <div style={{fontSize:17,fontWeight:900,color:"#fff",lineHeight:1.1,textShadow:"0 1px 4px rgba(0,0,0,0.6)"}}>{car.targa||car.name}</div>
+                    {car.model&&<div style={{fontSize:11,fontWeight:600,color:"rgba(255,255,255,0.85)",textShadow:"0 1px 3px rgba(0,0,0,0.6)"}}>{car.model}</div>}
+                  </div>
                 </div>
                 <div style={{padding:"10px 12px"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:car.targa||car.viti_prodhimit?6:0}}>
-                    <div style={{width:8,height:8,borderRadius:"50%",background:cc.ac,flexShrink:0}}/>
-                    <span style={{flex:1,fontSize:13,fontWeight:800,color:cc.tx,lineHeight:1.3}}>{car.targa||car.name}</span>
-                    <button onClick={()=>openEditCar(car)} style={{background:"none",border:"none",cursor:"pointer",color:"#64748b",fontSize:14,padding:2}}>✏️</button>
-                    <button onClick={()=>delCar(car.id,car.name)} style={{background:"none",border:"none",cursor:"pointer",color:"#dc2626",fontSize:16,padding:2}}>🗑️</button>
-                  </div>
-                  {car.model&&<div style={{fontSize:11,color:"#64748b",fontWeight:600,marginBottom:4}}>{car.model}</div>}
                   {(car.viti_prodhimit||car.karburanti||car.kambio||car.shasia)&&(
-                    <div style={{fontSize:10,color:"#64748b",lineHeight:1.6}}>
+                    <div style={{fontSize:10,color:"#64748b",lineHeight:1.6,marginBottom:8}}>
                       {car.viti_prodhimit&&<div>📅 {car.viti_prodhimit}{car.ngjyra?" · "+car.ngjyra:""}</div>}
                       {(car.kambio||car.karburanti)&&<div>⚙️ {[car.kambio,car.karburanti].filter(Boolean).join(" · ")}</div>}
                       {car.shasia&&<div>🔩 {car.shasia}</div>}
                     </div>
                   )}
+                  <button onClick={()=>toggleCarActive(car)} style={{
+                    width:"100%",padding:"7px 0",borderRadius:8,border:"1px solid "+(isActive?"#fca5a5":"#86efac"),
+                    background:isActive?"#fef2f2":"#f0fdf4",color:isActive?"#991b1b":"#166534",fontSize:12,fontWeight:700,cursor:"pointer"
+                  }}>{isActive?"⏸️ Kalo Pasive":"▶️ Aktivizo"}</button>
                 </div>
               </div>;
             })}
