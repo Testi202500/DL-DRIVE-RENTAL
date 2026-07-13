@@ -108,11 +108,11 @@ const CAR_PALETTE = [
   {bg:"#fdf4ff",tx:"#6b21a8",ac:"#a855f7"}, {bg:"#fff7ed",tx:"#9a3412",ac:"#ea580c"},
 ];
 const SC = {
-  "Konfirmuar":{bg:"#dbeafe",tx:"#1e40af",bd:"#bfdbfe"},
-  "Aktive":    {bg:"#dcfce7",tx:"#166534",bd:"#bbf7d0"},
-  "Dorëzuar":  {bg:"#fef3c7",tx:"#92400e",bd:"#fde68a"},
-  "Përfunduar":{bg:"#f3f4f6",tx:"#374151",bd:"#e5e7eb"},
-  "Anuluar":   {bg:"#fee2e2",tx:"#991b1b",bd:"#fecaca"},
+  "Konfirmuar":{bg:"#eef1fb",tx:"#2a44ab",bd:"#d7deF5"},
+  "Aktive":    {bg:"#e9f6ef",tx:"#1a7a4c",bd:"#c9ead7"},
+  "Dorëzuar":  {bg:"#fbf2e3",tx:"#a6650a",bd:"#f3ddb3"},
+  "Përfunduar":{bg:"#f1f2f4",tx:"#464b54",bd:"#e2e4e8"},
+  "Anuluar":   {bg:"#fbecec",tx:"#b23b3b",bd:"#f2cfcf"},
 };
 const CATS = ["Mirëmbajtje","Karburant","Sigurim","Taksa","Paga","Reklamë","Zyrë","Tjetër"];
 const DAYS_SQ = ["Di","Hë","Ma","Më","En","Pë","Sh"];
@@ -132,11 +132,22 @@ function diffDays(a,b) { if(!a||!b) return 0; return Math.max(1,Math.ceil((new D
 function nowStr() { return fmtDT(new Date().toISOString()); }
 function todayY() { return toYMD(new Date()); }
 
-const PB  = {padding:"8px 16px",borderRadius:8,background:"#1d4ed8",color:"#fff",border:"none",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"};
-const CB  = {padding:"8px 16px",borderRadius:8,background:"#f1f5f9",color:"#374151",border:"1px solid #e2e8f0",fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:"inherit"};
-const IB  = {padding:"6px 10px",borderRadius:7,background:"#f8fafc",border:"1px solid #e2e8f0",cursor:"pointer",fontSize:13,fontFamily:"inherit"};
-const FL  = {width:"100%",padding:"9px 11px",borderRadius:8,border:"1px solid #e2e8f0",fontSize:13,outline:"none",fontFamily:"inherit",boxSizing:"border-box",background:"#fafafa"};
-const NB  = {padding:"7px 14px",borderRadius:8,background:"#f1f5f9",border:"1px solid #e2e8f0",cursor:"pointer",fontSize:13,fontFamily:"inherit",fontWeight:600};
+// ─── DESIGN TOKENS (Fleet Ops) ─────────────────────────────────────────────────
+const T = {
+  navy:"#1f2a44", navyDeep:"#161e33", ink:"#17181c", muted:"#6b6f76",
+  line:"#e6e7ea", surface:"#ffffff", bg:"#fafafa",
+  accent:"#3556d1", accentDeep:"#2a44ab", accentSoft:"#eef1fb",
+  green:"#1a7a4c", greenSoft:"#e9f6ef",
+  amber:"#a6650a", amberSoft:"#fbf2e3",
+  red:"#b23b3b", redSoft:"#fbecec",
+  fontSans:"'IBM Plex Sans',-apple-system,sans-serif",
+  fontMono:"'IBM Plex Mono',monospace",
+};
+const PB  = {padding:"9px 16px",borderRadius:7,background:T.accent,color:"#fff",border:"none",fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:T.fontSans,whiteSpace:"nowrap"};
+const CB  = {padding:"9px 16px",borderRadius:7,background:T.surface,color:T.ink,border:"1px solid "+T.line,fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:T.fontSans};
+const IB  = {padding:"6px 10px",borderRadius:6,background:T.bg,border:"1px solid "+T.line,cursor:"pointer",fontSize:13,fontFamily:T.fontSans};
+const FL  = {width:"100%",padding:"9px 11px",borderRadius:7,border:"1px solid "+T.line,fontSize:13,outline:"none",fontFamily:T.fontSans,boxSizing:"border-box",background:"#fcfcfd"};
+const NB  = {padding:"7px 14px",borderRadius:7,background:T.bg,border:"1px solid "+T.line,cursor:"pointer",fontSize:13,fontFamily:T.fontSans,fontWeight:600};
 
 function Badge({s}) { const c=SC[s]||{bg:"#f3f4f6",tx:"#374151"}; return <span style={{padding:"3px 9px",borderRadius:20,fontSize:11,fontWeight:700,background:c.bg,color:c.tx}}>{s}</span>; }
 function DateInput({value,onChange,style}){
@@ -373,29 +384,40 @@ export default function App() {
   const curPage = NAV.find(n=>n.id===page)?page:defPage;
 
   return (
-    <div style={{minHeight:"100vh",background:"#f1f5f9",fontFamily:"'Inter',sans-serif",display:"flex",flexDirection:"column"}}>
-      <div style={{background:"#0a0a0a",color:"#fff",padding:"0 14px",display:"flex",alignItems:"center",gap:10,height:50,flexShrink:0,borderBottom:"1px solid rgba(201,168,76,0.22)",boxShadow:"0 2px 16px rgba(0,0,0,0.5)"}}>
+    <div style={{minHeight:"100vh",background:T.bg,fontFamily:T.fontSans,display:"flex",flexDirection:"column"}}>
+      <style>{`
+        @media (max-width: 720px){
+          .fo-tabbar{ position:fixed; bottom:0; left:0; right:0; z-index:60;
+            padding-bottom:env(safe-area-inset-bottom); justify-content:space-around; overflow-x:visible; }
+          .fo-tabbar button{ flex:1; flex-direction:column; gap:2px; padding:8px 2px 7px !important;
+            font-size:10px !important; border-bottom:none !important; border-top:2px solid transparent; }
+          .fo-tabbar button[data-active="true"]{ border-top-color:${T.accent}; }
+          .fo-content{ padding-bottom:64px; }
+        }
+      `}</style>
+      <div style={{background:T.navy,color:"#fff",padding:"0 14px",display:"flex",alignItems:"center",gap:10,height:50,flexShrink:0}}>
         <span style={{fontSize:20}}>🚗</span>
-        <span style={{fontWeight:800,fontSize:13,color:"#c9a84c",letterSpacing:"0.5px"}}>{JSON.parse(localStorage.getItem("crm_brand")||"{}").appName||"Car Rental Manager"}</span>
+        <span style={{fontWeight:700,fontSize:13,color:"#fff",letterSpacing:"-0.01em"}}>{JSON.parse(localStorage.getItem("crm_brand")||"{}").appName||"Car Rental Manager"}</span>
         <div style={{flex:1}}/>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <div style={{background:"rgba(201,168,76,0.12)",border:"1px solid rgba(201,168,76,0.22)",borderRadius:20,padding:"3px 12px",fontSize:11,color:"#c9a84c",fontWeight:600}}>{sess.profile?.name?.split(" ")[0]}</div>
-          <button onClick={reload} title="Refresh" style={{background:"rgba(201,168,76,0.1)",border:"1px solid rgba(201,168,76,0.2)",color:"#c9a84c",borderRadius:8,padding:"6px 10px",fontSize:14,cursor:"pointer",lineHeight:1}}>↻</button>
-          <button onClick={logout} style={{background:"linear-gradient(135deg,#a07828,#c9a84c)",border:"none",color:"#0a0a0a",borderRadius:8,padding:"6px 14px",fontSize:12,cursor:"pointer",fontWeight:800}}>Dil</button>
+          <div style={{background:"rgba(255,255,255,0.1)",borderRadius:20,padding:"3px 12px",fontSize:11,color:"#dde3f5",fontWeight:600}}>{sess.profile?.name?.split(" ")[0]}</div>
+          <button onClick={reload} title="Refresh" style={{background:"rgba(255,255,255,0.08)",border:"none",color:"#fff",borderRadius:7,padding:"6px 10px",fontSize:14,cursor:"pointer",lineHeight:1}}>↻</button>
+          <button onClick={logout} style={{background:T.accent,border:"none",color:"#fff",borderRadius:7,padding:"6px 14px",fontSize:12,cursor:"pointer",fontWeight:700,fontFamily:T.fontSans}}>Dil</button>
         </div>
       </div>
-      <div style={{background:"#111",borderBottom:"1px solid rgba(201,168,76,0.18)",display:"flex",flexShrink:0,overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-        {NAV.map(n=><button key={n.id} onClick={()=>setPage(n.id)} style={{padding:"12px 14px",border:"none",background:"none",cursor:"pointer",fontWeight:curPage===n.id?700:500,fontSize:12,fontFamily:"inherit",color:curPage===n.id?"#c9a84c":"#6b6b6b",borderBottom:curPage===n.id?"2px solid #c9a84c":"2px solid transparent",whiteSpace:"nowrap",flexShrink:0}}>{n.lb}</button>)}
+      <div className="fo-tabbar" style={{background:T.navyDeep,display:"flex",flexShrink:0,overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+        {NAV.map(n=><button key={n.id} data-active={curPage===n.id} onClick={()=>setPage(n.id)} style={{padding:"12px 14px",border:"none",background:"none",cursor:"pointer",fontWeight:curPage===n.id?700:500,fontSize:12,fontFamily:T.fontSans,color:curPage===n.id?"#fff":"#9aa3bd",borderBottom:curPage===n.id?"2px solid "+T.accent:"2px solid transparent",whiteSpace:"nowrap",flexShrink:0}}>{n.lb}</button>)}
       </div>
       {/* Notification permission banner */}
       {"Notification" in window && Notification.permission==="default" && (
-        <div style={{background:"#1a1500",borderBottom:"1px solid rgba(201,168,76,0.25)",padding:"8px 16px",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+        <div style={{background:T.accentSoft,borderBottom:"1px solid "+T.line,padding:"8px 16px",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
           <span style={{fontSize:13}}>🔔</span>
-          <span style={{fontSize:12,color:"#c9a84c",flex:1}}>Aktivizo njoftimet për kujtesa dorëzimi/marrjeje</span>
-          <button onClick={()=>Notification.requestPermission()} style={{background:"linear-gradient(135deg,#a07828,#c9a84c)",border:"none",color:"#0a0a0a",borderRadius:7,padding:"5px 12px",fontSize:12,cursor:"pointer",fontWeight:700}}>Aktivizo</button>
+          <span style={{fontSize:12,color:T.accentDeep,flex:1}}>Aktivizo njoftimet për kujtesa dorëzimi/marrjeje</span>
+          <button onClick={()=>Notification.requestPermission()} style={{background:T.accent,border:"none",color:"#fff",borderRadius:7,padding:"5px 12px",fontSize:12,cursor:"pointer",fontWeight:700,fontFamily:T.fontSans}}>Aktivizo</button>
         </div>
       )}
-      <div style={{flex:1,overflow:"auto"}}>
+      <div className="fo-content" style={{flex:1,overflow:"auto"}}>
+
         {curPage==="cal" && <CalPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
         {curPage==="res" && <ResPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
         {curPage==="fin" && <FinPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
@@ -417,67 +439,48 @@ function LoginScreen({lf,setLf,login}) {
   const logoUrl = brand.logoUrl || "";
   const appName = brand.appName || "Car Rental Manager";
   return (
-    <div style={{minHeight:"100vh",fontFamily:"'Inter',sans-serif",position:"relative",overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center"}}>
-      {/* Black base */}
-      <div style={{position:"absolute",inset:0,background:"#0a0a0a"}}/>
-      {/* Gold radial glow top-right */}
-      <div style={{position:"absolute",top:"-10%",right:"-5%",width:560,height:560,borderRadius:"50%",background:"radial-gradient(circle,rgba(201,168,76,0.2) 0%,rgba(201,168,76,0.07) 40%,transparent 70%)",pointerEvents:"none"}}/>
-      {/* Subtle gold glow bottom-left */}
-      <div style={{position:"absolute",bottom:"-10%",left:"-5%",width:400,height:400,borderRadius:"50%",background:"radial-gradient(circle,rgba(201,168,76,0.12) 0%,transparent 65%)",pointerEvents:"none"}}/>
-      {/* Very subtle center glow */}
-      <div style={{position:"absolute",top:"30%",left:"50%",transform:"translateX(-50%)",width:600,height:300,borderRadius:"50%",background:"radial-gradient(ellipse,rgba(201,168,76,0.05) 0%,transparent 70%)",pointerEvents:"none"}}/>
-
-      {/* Gold top line */}
-      <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"linear-gradient(90deg,transparent,#c9a84c,#e8c96a,#c9a84c,transparent)"}}/>
+    <div style={{minHeight:"100vh",fontFamily:T.fontSans,position:"relative",overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center",background:T.navyDeep}}>
+      {/* Subtle indigo glow, restrained */}
+      <div style={{position:"absolute",top:"-15%",right:"-10%",width:520,height:520,borderRadius:"50%",background:"radial-gradient(circle,rgba(53,86,209,0.16) 0%,transparent 65%)",pointerEvents:"none"}}/>
+      <div style={{position:"absolute",bottom:"-15%",left:"-10%",width:420,height:420,borderRadius:"50%",background:"radial-gradient(circle,rgba(53,86,209,0.10) 0%,transparent 65%)",pointerEvents:"none"}}/>
 
       {/* Card */}
-      <div style={{position:"relative",zIndex:1,background:"rgba(18,18,18,0.92)",backdropFilter:"blur(24px)",border:"1px solid rgba(201,168,76,0.28)",borderRadius:20,padding:"40px 32px",width:"100%",maxWidth:380,boxShadow:"0 40px 80px rgba(0,0,0,0.8), 0 0 60px rgba(201,168,76,0.07)",margin:16}}>
+      <div style={{position:"relative",zIndex:1,background:T.surface,border:"1px solid "+T.line,borderRadius:14,padding:"36px 30px",width:"100%",maxWidth:380,boxShadow:"0 24px 64px rgba(0,0,0,0.35)",margin:16}}>
 
-        {/* Gold accent top bar on card */}
-        <div style={{position:"absolute",top:0,left:"20%",right:"20%",height:1,background:"linear-gradient(90deg,transparent,rgba(201,168,76,0.7),transparent)",borderRadius:1}}/>
-
-        <div style={{textAlign:"center",marginBottom:32}}>
+        <div style={{textAlign:"center",marginBottom:28}}>
           {logoUrl
-            ? <img src={logoUrl} alt="logo" style={{width:76,height:76,borderRadius:16,objectFit:"cover",margin:"0 auto 16px",display:"block",boxShadow:"0 8px 32px rgba(201,168,76,0.28),0 0 0 2px rgba(201,168,76,0.22)"}}/>
-            : <div style={{width:76,height:76,borderRadius:18,background:"linear-gradient(135deg,#1c1c1c,#252520)",border:"2px solid rgba(201,168,76,0.45)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:34,margin:"0 auto 16px",boxShadow:"0 8px 32px rgba(201,168,76,0.22),0 0 0 4px rgba(201,168,76,0.09)"}}>🚗</div>
+            ? <img src={logoUrl} alt="logo" style={{width:64,height:64,borderRadius:12,objectFit:"cover",margin:"0 auto 14px",display:"block",border:"1px solid "+T.line}}/>
+            : <div style={{width:64,height:64,borderRadius:12,background:T.navy,display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,margin:"0 auto 14px"}}>🚗</div>
           }
-          <h1 style={{color:"#c9a84c",margin:0,fontSize:22,fontWeight:800,letterSpacing:"0.5px",textShadow:"0 0 30px rgba(201,168,76,0.45)"}}>{appName}</h1>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginTop:8}}>
-            <div style={{width:24,height:1,background:"linear-gradient(90deg,transparent,rgba(212,175,55,0.5))"}}/>
-            <span style={{color:"#7a6a3a",fontSize:11,letterSpacing:2,fontWeight:600,textTransform:"uppercase"}}>Menaxhim Makinash</span>
-            <div style={{width:24,height:1,background:"linear-gradient(90deg,rgba(212,175,55,0.5),transparent)"}}/>
-          </div>
+          <h1 style={{color:T.ink,margin:0,fontSize:19,fontWeight:700,letterSpacing:"-0.01em"}}>{appName}</h1>
+          <div style={{color:T.muted,fontSize:11,letterSpacing:1,fontWeight:600,textTransform:"uppercase",marginTop:6}}>Menaxhim Flote</div>
         </div>
 
-        <div style={{marginBottom:16}}>
-          <label style={{color:"#8a7a45",fontSize:10,fontWeight:700,letterSpacing:2,display:"block",marginBottom:7,textTransform:"uppercase"}}>Email</label>
+        <div style={{marginBottom:14}}>
+          <label style={{color:T.muted,fontSize:11,fontWeight:600,display:"block",marginBottom:6}}>Email</label>
           <input value={lf.email} onChange={e=>setLf(f=>({...f,email:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&login()}
-            placeholder="email@kompania.al" type="email"
-            style={{width:"100%",padding:"13px 14px",borderRadius:10,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(201,168,76,0.22)",color:"#dcc88a",fontSize:14,outline:"none",boxSizing:"border-box",fontFamily:"inherit",transition:"border 0.2s"}}/>
+            placeholder="email@kompania.al" type="email" style={FL}/>
         </div>
         <div style={{marginBottom:10}}>
-          <label style={{color:"#8a7a45",fontSize:10,fontWeight:700,letterSpacing:2,display:"block",marginBottom:7,textTransform:"uppercase"}}>Fjalëkalimi</label>
+          <label style={{color:T.muted,fontSize:11,fontWeight:600,display:"block",marginBottom:6}}>Fjalëkalimi</label>
           <div style={{position:"relative"}}>
             <input type={showPass?"text":"password"} value={lf.password} onChange={e=>setLf(f=>({...f,password:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&login()}
-              placeholder="••••••••"
-              style={{width:"100%",padding:"13px 40px 13px 14px",borderRadius:10,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(201,168,76,0.22)",color:"#dcc88a",fontSize:14,outline:"none",boxSizing:"border-box",fontFamily:"inherit"}}/>
-            <button type="button" onClick={()=>setShowPass(s=>!s)} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#8a7a45",fontSize:16,padding:4}}>
+              placeholder="••••••••" style={{...FL,paddingRight:40}}/>
+            <button type="button" onClick={()=>setShowPass(s=>!s)} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:T.muted,fontSize:16,padding:4}}>
               {showPass?"🙈":"👁️"}
             </button>
           </div>
         </div>
 
-        {lf.err&&<div style={{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.25)",color:"#fca5a5",borderRadius:8,padding:"9px 12px",fontSize:12,marginTop:8}}>⚠️ {lf.err}</div>}
+        {lf.err&&<div style={{background:T.redSoft,border:"1px solid #f2cfcf",color:T.red,borderRadius:7,padding:"9px 12px",fontSize:12,marginTop:8}}>⚠️ {lf.err}</div>}
 
         <button type="button" onClick={login} disabled={lf.loading}
-          style={{width:"100%",marginTop:22,padding:"14px",borderRadius:11,background:"linear-gradient(135deg,#a07828 0%,#c9a84c 35%,#e0b95a 55%,#c9a84c 75%,#a07828 100%)",color:"#0a0a0a",border:"none",fontWeight:800,fontSize:15,cursor:lf.loading?"not-allowed":"pointer",opacity:lf.loading?0.7:1,boxShadow:"0 6px 24px rgba(201,168,76,0.32),0 2px 8px rgba(0,0,0,0.5)",letterSpacing:"0.5px"}}>
+          style={{width:"100%",marginTop:20,padding:"13px",borderRadius:8,background:T.accent,color:"#fff",border:"none",fontWeight:700,fontSize:14,cursor:lf.loading?"not-allowed":"pointer",opacity:lf.loading?0.7:1,fontFamily:T.fontSans}}>
           {lf.loading?"Duke hyrë...":"Hyr →"}
         </button>
 
-        <div style={{marginTop:28,display:"flex",alignItems:"center",gap:10}}>
-          <div style={{flex:1,height:1,background:"rgba(201,168,76,0.13)"}}/>
-          <span style={{fontSize:10,color:"#4a4030",letterSpacing:1}}>© {new Date().getFullYear()}</span>
-          <div style={{flex:1,height:1,background:"rgba(201,168,76,0.13)"}}/>
+        <div style={{marginTop:24,textAlign:"center"}}>
+          <span style={{fontSize:11,color:"#b6b9c0"}}>© {new Date().getFullYear()}</span>
         </div>
       </div>
     </div>
