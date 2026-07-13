@@ -1514,6 +1514,7 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
   const [ledger,setLedger]=useState([]);
   const [exps,setExps]=useState([]);
   const [cars,setCars]=useState([]);
+  const [reses,setReses]=useState([]);
   const [loading,setLoading]=useState(true);
   // arkTab = "cash_ALL" | "cash_EUR" | "pos_ALL" | "pos_EUR" | "transfer_ALL" | "transfer_EUR"
   const [arkTab,setArkTab]=useState("cash_ALL");
@@ -1522,14 +1523,18 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
   const [showA,setShowA]=useState(false);
   const [showT,setShowT]=useState(false);
   const [showE,setShowE]=useState(false);
-  const [af,setAf]=useState({amount:"",currency:"ALL",method:"cash",description:"",type:"in"});
+  const [af,setAf]=useState({amount:"",currency:"ALL",method:"cash",description:"",type:"in",linkRes:false,resId:""});
   const [tf,setTf]=useState({from:"ALL",amount:"",rate:"108"});
   const [ef,setEf]=useState({description:"",amount:"",currency:"ALL",method:"cash",category:"Mirëmbajtje",catCustom:"",car_name:"",expense_date:todayY()});
 
   useEffect(()=>{
     setLoading(true);
-    Promise.all([sbAuthGet("cash_ledger","",sess.token),sbAuthGet("expenses","",sess.token),sbAuthGet("cars","order=sort_order.asc",sess.token)])
-      .then(([l,e,c])=>{setLedger(l);setExps(e);setCars(c);setLoading(false);}).catch(()=>setLoading(false));
+    Promise.all([
+      sbAuthGet("cash_ledger","",sess.token),
+      sbAuthGet("expenses","",sess.token),
+      sbAuthGet("cars","order=sort_order.asc",sess.token),
+      sbAuthGet("reservations","status=neq.Anuluar",sess.token)
+    ]).then(([l,e,c,r])=>{setLedger(l);setExps(e);setCars(c);setReses(r);setLoading(false);}).catch(()=>setLoading(false));
   },[reloadTick,sess.token]);
 
   // Balanca per cdo llogari+monedhë
@@ -1540,10 +1545,34 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
   async function doAdd(){
     if(!af.amount) return;
     const a=Number(af.amount)*(af.type==="in"?1:-1);
+    // Nese eshte hyrje dhe lidhet me rezervim
+    const selRes = af.linkRes&&af.resId ? reses.find(r=>r.id===af.resId) : null;
+    const desc = selRes
+      ? `Arkëtim (${ACC_INFO(af.method).label}): ${selRes.car_name} - ${selRes.client_name}`
+      : af.description;
     try {
-      await sbAuthPost("cash_ledger",{currency:af.currency,amount:a,method:af.method,type:af.type==="in"?"manual_in":"manual_out",description:af.description,created_by:sess.profile?.username},sess.token);
-      addLog("Arkë "+(af.type==="in"?"Hyrje":"Dalje")+" ("+ACC_INFO(af.method).label+")",fmtM(Math.abs(a),af.currency)+" - "+af.description);
-      reload(); setShowA(false); setAf({amount:"",currency:"ALL",method:"cash",description:"",type:"in"});
+      await sbAuthPost("cash_ledger",{
+        currency:af.currency, amount:a, method:af.method,
+        type:af.type==="in"?"payment":"manual_out",
+        description:desc,
+        reference_id:selRes?.id||null,
+        created_by:sess.profile?.username
+      },sess.token);
+      // Perditeso amount_paid ne rezervim nese eshte lidhur
+      if(selRes&&af.type==="in"){
+        const newPaid=Number(selRes.amount_paid||0)+Number(af.amount);
+        const isFull=newPaid>=Number(selRes.total_price);
+        await sbAuthPatch("reservations",selRes.id,{
+          amount_paid:newPaid,
+          ...(isFull?{payment_status:"paguar",paid_at:new Date().toISOString(),paid_by:sess.profile?.username}:{})
+        },sess.token);
+        addLog("Arkëtim ("+ACC_INFO(af.method).label+")",selRes.car_name+" - "+selRes.client_name+" "+fmtM(Number(af.amount),af.currency));
+      } else {
+        addLog("Arkë "+(af.type==="in"?"Hyrje":"Dalje")+" ("+ACC_INFO(af.method).label+")",fmtM(Math.abs(a),af.currency)+(af.description?" - "+af.description:""));
+      }
+      reload();
+      setShowA(false);
+      setAf({amount:"",currency:"ALL",method:"cash",description:"",type:"in",linkRes:false,resId:""});
     } catch(e){alert(e.message);}
   }
 
@@ -1715,24 +1744,81 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
       </div>
 
       {/* Modal Hyrje/Dalje */}
-      {showA&&<Modal title={af.type==="in"?"📥 Hyrje":"📤 Dalje"} onClose={()=>setShowA(false)}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <Fld label="Llogaria *" col2>
-            <div style={{display:"flex",gap:6}}>
-              {ACCOUNTS.map(acc=>(
-                <button key={acc.id} onClick={()=>setAf(f=>({...f,method:acc.id}))} style={{flex:1,padding:"8px 4px",borderRadius:8,border:"2px solid "+(af.method===acc.id?acc.color:"#e2e8f0"),background:af.method===acc.id?"#eff6ff":"#fff",fontSize:12,fontWeight:700,cursor:"pointer",color:af.method===acc.id?acc.color:"#64748b"}}>{acc.label}</button>
-              ))}
-            </div>
-          </Fld>
-          <Fld label="Shuma *"><input type="number" value={af.amount} onChange={e=>setAf(f=>({...f,amount:e.target.value}))} style={FL}/></Fld>
-          <Fld label="Monedha"><select value={af.currency} onChange={e=>setAf(f=>({...f,currency:e.target.value}))} style={FL}><option value="ALL">Lekë</option><option value="EUR">Euro</option></select></Fld>
-          <Fld label="Përshkrimi" col2><input value={af.description} onChange={e=>setAf(f=>({...f,description:e.target.value}))} style={FL} placeholder="Arsyeja..."/></Fld>
-        </div>
-        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
-          <button onClick={()=>setShowA(false)} style={CB}>Anulo</button>
-          <button onClick={doAdd} style={PB}>✅ Konfirmo</button>
-        </div>
-      </Modal>}
+      {showA&&(()=>{
+        const selRes=af.linkRes&&af.resId?reses.find(r=>r.id===af.resId):null;
+        const pendingReses=reses.filter(r=>r.payment_status!=="paguar"&&r.status!=="Anuluar"&&r.status!=="Përfunduar");
+        const debt=selRes?Math.max(0,Number(selRes.total_price||0)-Number(selRes.amount_paid||0)):0;
+        return (
+        <Modal title={af.type==="in"?"📥 Hyrje":"📤 Dalje"} onClose={()=>setShowA(false)}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <Fld label="Llogaria *" col2>
+              <div style={{display:"flex",gap:6}}>
+                {ACCOUNTS.map(acc=>(
+                  <button key={acc.id} onClick={()=>setAf(f=>({...f,method:acc.id}))} style={{flex:1,padding:"8px 4px",borderRadius:8,border:"2px solid "+(af.method===acc.id?acc.color:"#e2e8f0"),background:af.method===acc.id?"#eff6ff":"#fff",fontSize:12,fontWeight:700,cursor:"pointer",color:af.method===acc.id?acc.color:"#64748b"}}>{acc.label}</button>
+                ))}
+              </div>
+            </Fld>
+            <Fld label="Shuma *"><input type="number" value={af.amount} onChange={e=>setAf(f=>({...f,amount:e.target.value}))} style={FL}/></Fld>
+            <Fld label="Monedha"><select value={af.currency} onChange={e=>setAf(f=>({...f,currency:e.target.value}))} style={FL}><option value="ALL">Lekë</option><option value="EUR">Euro</option></select></Fld>
+
+            {/* Lidho me rezervim — vetem per hyrje */}
+            {af.type==="in"&&(
+              <div style={{gridColumn:"span 2",background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:9,padding:"10px 12px"}}>
+                <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",marginBottom:af.linkRes?10:0}}>
+                  <input type="checkbox" checked={af.linkRes} onChange={e=>setAf(f=>({...f,linkRes:e.target.checked,resId:""}))}
+                    style={{width:15,height:15,cursor:"pointer"}}/>
+                  <span style={{fontSize:12,fontWeight:700,color:"#0369a1"}}>🔗 Lidho me Rezervim Klienti</span>
+                </label>
+                {af.linkRes&&(
+                  <>
+                    <select value={af.resId} onChange={e=>setAf(f=>({...f,resId:e.target.value}))} style={{...FL,marginBottom:8}}>
+                      <option value="">— Zgjidh Klientin / Rezervimin —</option>
+                      {pendingReses
+                        .sort((a,b)=>a.client_name?.localeCompare(b.client_name))
+                        .map(r=>{
+                          const d=Math.max(0,Number(r.total_price||0)-Number(r.amount_paid||0));
+                          return <option key={r.id} value={r.id}>
+                            {r.client_name} · {r.car_name} · {fmtFull(r.date_from)} · Detyrim: {fmtM(d,r.currency)}
+                          </option>;
+                        })
+                      }
+                    </select>
+                    {selRes&&(
+                      <div style={{background:"#fff",borderRadius:7,padding:"8px 10px",fontSize:12,border:"1px solid #bae6fd"}}>
+                        <div style={{fontWeight:700,color:"#0f172a",marginBottom:3}}>{selRes.client_name} · {selRes.car_name}</div>
+                        <div style={{display:"flex",gap:14,flexWrap:"wrap",color:"#64748b"}}>
+                          <span>📅 {fmtFull(selRes.date_from)} → {fmtFull(selRes.date_to)}</span>
+                          <span>💶 Total: {fmtM(selRes.total_price,selRes.currency)}</span>
+                          {Number(selRes.amount_paid||0)>0&&<span style={{color:"#16a34a"}}>✅ Paguar: {fmtM(selRes.amount_paid,selRes.currency)}</span>}
+                          <span style={{color:"#dc2626",fontWeight:700}}>⏳ Detyrim: {fmtM(debt,selRes.currency)}</span>
+                        </div>
+                        {af.amount&&Number(af.amount)>0&&(
+                          <div style={{marginTop:6,fontWeight:700,color:Number(af.amount)>=debt?"#16a34a":"#f59e0b",fontSize:12}}>
+                            {Number(af.amount)>=debt
+                              ?"✅ Do paguhet plotësisht!"
+                              :"⏳ Mbetet: "+fmtM(debt-Number(af.amount),selRes.currency)}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {!af.linkRes&&(
+              <Fld label="Përshkrimi" col2>
+                <input value={af.description} onChange={e=>setAf(f=>({...f,description:e.target.value}))} style={FL} placeholder="Arsyeja..."/>
+              </Fld>
+            )}
+          </div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
+            <button onClick={()=>setShowA(false)} style={CB}>Anulo</button>
+            <button onClick={doAdd} disabled={af.linkRes&&!af.resId} style={{...PB,opacity:af.linkRes&&!af.resId?0.5:1}}>✅ Konfirmo</button>
+          </div>
+        </Modal>
+        );
+      })()}
 
       {/* Modal Kalim Monedhë */}
       {showT&&<Modal title="🔄 Kalim Ndërmjet Monedhave (Cash)" onClose={()=>setShowT(false)}>
