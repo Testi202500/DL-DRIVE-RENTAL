@@ -1672,8 +1672,17 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
     const a=Number(ef.amount);
     const finalCat = ef.category==="__custom__" ? ef.catCustom||"Tjetër" : ef.category;
     try {
-      const {catCustom, ...efClean} = ef;
-      await sbAuthPost("expenses",{...efClean,category:finalCat,amount:a,created_by:sess.profile?.username},sess.token);
+      // Dërgojmë vetëm kolonat që ekzistojnë në tabelën expenses
+      const expBody = {
+        description: ef.description,
+        amount: a,
+        currency: ef.currency,
+        category: finalCat,
+        car_name: ef.car_name||null,
+        expense_date: ef.expense_date||todayY(),
+        created_by: sess.profile?.username||""
+      };
+      await sbAuthPost("expenses", expBody, sess.token);
       await sbAuthPost("cash_ledger",{currency:ef.currency,amount:-a,method:ef.method,type:"expense",description:"Shpenzim: "+ef.description+(ef.car_name?" ("+ef.car_name+")":""),created_by:sess.profile?.username},sess.token);
       addLog("Shto Shpenzim ("+ACC_INFO(ef.method).label+")",ef.description+" "+fmtM(a,ef.currency));
       reload(); setShowE(false); setEf({description:"",amount:"",currency:"ALL",method:"cash",category:"Mirëmbajtje",catCustom:"",car_name:"",expense_date:todayY()});
