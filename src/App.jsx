@@ -252,7 +252,7 @@ export default function App() {
   const [reloadTick, setReloadTick] = useState(0);
   const reload = useCallback(() => setReloadTick(t=>t+1), []);
 
-  // ── SESSION PERSISTENCE: restore from localStorage on mount, refresh token if needed
+  // ── SESSION PERSISTENCE
   useEffect(()=>{
     (async ()=>{
       try {
@@ -260,7 +260,6 @@ export default function App() {
         if(!saved) return;
         const s = JSON.parse(saved);
         if(!s?.token || !s?.profile) return;
-        // Try refreshing token immediately to ensure it's valid
         if(s.refreshToken){
           try {
             const auth = await sbRefreshToken(s.refreshToken);
@@ -269,7 +268,6 @@ export default function App() {
             localStorage.setItem("crm_session", JSON.stringify(newS));
             return;
           } catch(e) {
-            // Refresh failed - clear session, force re-login
             localStorage.removeItem("crm_session");
             return;
           }
@@ -279,24 +277,39 @@ export default function App() {
     })();
   }, []);
 
-  // ── AUTO REFRESH TOKEN every 50 minutes (tokens expire in 60min)
+  // ── AUTO REFRESH: çdo 20 minuta + kur faqja bëhet aktive (telefon wake)
   useEffect(()=>{
     if(!sess?.refreshToken) return;
-    const t = setInterval(async ()=>{
+
+    async function doRefresh(s) {
       try {
-        const auth = await sbRefreshToken(sess.refreshToken);
-        setSess(s=>{
-          const newS = {...s, token:auth.access_token, refreshToken:auth.refresh_token};
-          localStorage.setItem("crm_session", JSON.stringify(newS));
-          return newS;
-        });
+        const auth = await sbRefreshToken(s.refreshToken||sess.refreshToken);
+        const newS = {...sess, ...s, token:auth.access_token, refreshToken:auth.refresh_token};
+        setSess(newS);
+        localStorage.setItem("crm_session", JSON.stringify(newS));
       } catch(e) {
-        // Refresh failed - logout
         localStorage.removeItem("crm_session");
         setSess(null);
       }
-    }, 50*60*1000);
-    return ()=>clearInterval(t);
+    }
+
+    // Timer çdo 20 min
+    const t = setInterval(()=>doRefresh(sess), 20*60*1000);
+
+    // Kur telefoni zgjohet / faqja bëhet aktive
+    function onVisible() {
+      if(document.visibilityState==="visible") {
+        const saved = localStorage.getItem("crm_session");
+        if(!saved) { setSess(null); return; }
+        try {
+          const s = JSON.parse(saved);
+          doRefresh(s);
+        } catch { setSess(null); }
+      }
+    }
+    document.addEventListener("visibilitychange", onVisible);
+
+    return ()=>{ clearInterval(t); document.removeEventListener("visibilitychange", onVisible); };
   }, [sess?.refreshToken]);
 
   // ── NOTIFICATIONS: check every 10 min
@@ -1362,16 +1375,19 @@ function FinPage({sess,reload,reloadTick,addLog}) {
 
   return (
     <div style={{padding:mob?10:14,maxWidth:1000,margin:"0 auto"}}>
-      <h2 style={{margin:"0 0 16px",fontSize:17,fontWeight:700,color:"#0f172a"}}>📊 Raportet Financiare</h2>
-      <div style={{display:"grid",gridTemplateColumns:mob?"1fr 1fr":"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginBottom:16}}>
-        {[["#0f172a","🇦🇱 LEKË",incL,expL,true],["#064e3b","🇪🇺 EURO",incE,expE,false]].map(([hbg,title,inc,exp,isL],i)=>(
-          <div key={i} style={{background:"#fff",border:"2px solid #e2e8f0",borderRadius:14,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,0.06)"}}>
-            <div style={{background:hbg,color:"#fff",padding:"10px 16px",fontWeight:700,fontSize:14}}>{title}</div>
-            <div style={{padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
-              {[["Të Ardhura (paguar)",inc,"#1d4ed8"],["Shpenzime",exp,"#dc2626"],["BALANCA",inc-exp,(inc-exp)>=0?"#16a34a":"#dc2626"]].map(([lb,val,col],j)=>(
-                <div key={lb} style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingTop:j===2?10:0,borderTop:j===2?"1px solid #e2e8f0":"none"}}>
-                  <span style={{fontSize:13,color:"#64748b",fontWeight:j===2?700:400}}>{lb}</span>
-                  <span style={{fontSize:j===2?17:14,fontWeight:j===2?800:700,color:col}}>{isL?val.toLocaleString("sq-AL")+" L":"€"+val.toFixed(2)}</span>
+      <h2 style={{margin:"0 0 12px",fontSize:mob?15:17,fontWeight:700,color:"#0f172a"}}>📊 Financa</h2>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+        {[["🇦🇱","LEKË",incL,expL,true,"#0f172a"],["🇪🇺","EURO",incE,expE,false,"#064e3b"]].map(([fl,title,inc,exp,isL,hbg],i)=>(
+          <div key={i} style={{background:"#fff",border:"2px solid #e2e8f0",borderRadius:12,overflow:"hidden"}}>
+            <div style={{background:hbg,color:"#fff",padding:"8px 12px",fontWeight:700,fontSize:mob?11:13}}>{fl} {title}</div>
+            <div style={{padding:mob?"10px 10px":"14px 16px",display:"flex",flexDirection:"column",gap:6}}>
+              {[["Të ardhura",inc,"#1d4ed8"],["Shpenzime",exp,"#dc2626"],["Balanca",inc-exp,(inc-exp)>=0?"#16a34a":"#dc2626"]].map(([lb,val,col],j)=>(
+                <div key={lb} style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingTop:j===2?6:0,borderTop:j===2?"1px solid #e2e8f0":"none"}}>
+                  <span style={{fontSize:mob?10:12,color:"#64748b",fontWeight:j===2?700:400}}>{lb}</span>
+                  <span style={{fontSize:mob?j===2?14:11:j===2?17:13,fontWeight:j===2?800:700,color:col}}>
+                    {isL?Math.round(val).toLocaleString("sq-AL")+" L":"€"+val.toFixed(2)}
+                  </span>
                 </div>
               ))}
             </div>
@@ -1380,16 +1396,16 @@ function FinPage({sess,reload,reloadTick,addLog}) {
       </div>
 
       {heldDeposits.length>0&&(
-        <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,padding:20,marginBottom:16}}>
-          <h3 style={{margin:"0 0 14px",fontSize:15,fontWeight:700,color:"#0f172a"}}>🔒 Depozita të Mbajtura — Kthim te Klientët</h3>
+        <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:mob?12:20,marginBottom:12}}>
+          <h3 style={{margin:"0 0 10px",fontSize:mob?12:15,fontWeight:700,color:"#0f172a"}}>🔒 Depozita të Mbajtura</h3>
           {heldDeposits.map(([rid,g])=>(
-            <div key={rid} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:"1px solid #f1f5f9"}}>
+            <div key={rid} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",borderBottom:"1px solid #f1f5f9",flexWrap:"wrap"}}>
               <div style={{flex:1}}>
-                <div style={{fontWeight:700,fontSize:13,color:"#0f172a"}}>{g.reservation.client_name}</div>
-                <div style={{fontSize:11,color:"#94a3b8"}}>{carLabel(g.reservation.car_name,cars)}</div>
+                <div style={{fontWeight:700,fontSize:12,color:"#0f172a"}}>{g.reservation.client_name}</div>
+                <div style={{fontSize:10,color:"#94a3b8"}}>{carLabel(g.reservation.car_name,cars)}</div>
               </div>
-              <div style={{fontWeight:800,fontSize:15,color:"#1e40af"}}>{fmtM(g.held,g.currency)}</div>
-              <button onClick={()=>returnDeposit(rid,g)} disabled={returningId===rid} style={{...PB,background:"#7c3aed",fontSize:12,padding:"7px 14px",whiteSpace:"nowrap"}}>
+              <div style={{fontWeight:800,fontSize:13,color:"#1e40af"}}>{fmtM(g.held,g.currency)}</div>
+              <button onClick={()=>returnDeposit(rid,g)} disabled={returningId===rid} style={{...PB,background:"#7c3aed",fontSize:11,padding:"5px 9px",whiteSpace:"nowrap"}}>
                 {returningId===rid?"...":"↩️ Kthe"}
               </button>
             </div>
@@ -1397,8 +1413,8 @@ function FinPage({sess,reload,reloadTick,addLog}) {
         </div>
       )}
 
-      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,padding:20,marginBottom:16}}>
-        <h3 style={{margin:"0 0 16px",fontSize:15,fontWeight:700,color:"#0f172a"}}>🚗 Të Ardhura Sipas Makinës</h3>
+      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:mob?12:20,marginBottom:12}}>
+        <h3 style={{margin:"0 0 10px",fontSize:mob?12:15,fontWeight:700,color:"#0f172a"}}>🚗 Sipas Makinës</h3>
         {carNames.map(cn=>{
           const carReses=paid.filter(r=>r.car_name===cn);
           const iL=carReses.filter(r=>r.currency==="ALL").reduce((s,r)=>s+Number(r.amount_paid),0);
@@ -1410,40 +1426,40 @@ function FinPage({sess,reload,reloadTick,addLog}) {
           const cc=carColor(cn,carNames);
           const allR=reses.filter(r=>r.car_name===cn&&r.status!=="Anuluar");
           const totalDays=allR.reduce((s,r)=>s+diffDays(r.date_from,r.date_to),0);
-          return <div key={cn} style={{marginBottom:14}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-              <span style={{fontSize:13,fontWeight:700,color:cc.tx}}>{carLabel(cn,cars)}</span>
-              <div style={{display:"flex",gap:12,fontSize:12}}>
+          return <div key={cn} style={{marginBottom:10}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3,flexWrap:"wrap",gap:3}}>
+              <span style={{fontSize:12,fontWeight:700,color:cc.tx}}>{carLabel(cn,cars)}</span>
+              <div style={{display:"flex",gap:6,fontSize:11}}>
                 {iL>0&&<span style={{color:"#1d4ed8",fontWeight:700}}>{iL.toLocaleString("sq-AL")} L</span>}
                 {iE>0&&<span style={{color:"#059669",fontWeight:700}}>€{iE.toFixed(2)}</span>}
-                <span style={{color:"#94a3b8"}}>{carReses.length} rez · {totalDays} ditë</span>
+                <span style={{color:"#94a3b8"}}>{carReses.length}rez·{totalDays}d</span>
               </div>
             </div>
-            <div style={{background:"#f1f5f9",borderRadius:20,height:10,overflow:"hidden"}}>
+            <div style={{background:"#f1f5f9",borderRadius:20,height:7,overflow:"hidden"}}>
               <div style={{width:pct+"%",height:"100%",background:"linear-gradient(90deg,"+cc.ac+","+cc.bg+")",borderRadius:20}}/>
             </div>
-            {(eL>0||eE>0)&&<div style={{fontSize:11,color:"#dc2626",marginTop:2}}>Shpenzime: {eL>0?eL.toLocaleString("sq-AL")+" L":""}{eE>0?" €"+eE.toFixed(2):""}</div>}
+            {(eL>0||eE>0)&&<div style={{fontSize:10,color:"#dc2626",marginTop:1}}>Shp: {eL>0?eL.toLocaleString("sq-AL")+" L":""}{eE>0?" €"+eE.toFixed(2):""}</div>}
           </div>;
         })}
       </div>
 
-      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,padding:20,marginBottom:16}}>
-        <h3 style={{margin:"0 0 14px",fontSize:15,fontWeight:700,color:"#0f172a"}}>📈 Statistika</h3>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10}}>
-          {[["Rezervime","Totale",reses.filter(r=>r.status!=="Anuluar").length,"#1d4ed8"],["✅","Paguar Plotësisht",reses.filter(r=>r.payment_status==="paguar"&&r.status!=="Anuluar").length,"#16a34a"],["⏳","Pritje/Pjesë",reses.filter(r=>r.payment_status==="pritje"&&r.status!=="Anuluar").length,"#d97706"],["📤","Shpenzime",exps.length,"#dc2626"]].map(([ic,lb,val,col])=>(
-            <div key={lb} style={{background:"#f8fafc",borderRadius:10,padding:"12px 14px",textAlign:"center",border:"1px solid #e2e8f0"}}>
-              <div style={{fontSize:22,fontWeight:800,color:col}}>{val}</div>
-              <div style={{fontSize:11,color:"#64748b",marginTop:2,fontWeight:500}}>{lb}</div>
+      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:mob?12:20,marginBottom:12}}>
+        <h3 style={{margin:"0 0 10px",fontSize:mob?12:15,fontWeight:700,color:"#0f172a"}}>📈 Statistika</h3>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+          {[["📋","Rezervime",reses.filter(r=>r.status!=="Anuluar").length,"#1d4ed8"],["✅","Paguar",reses.filter(r=>r.payment_status==="paguar"&&r.status!=="Anuluar").length,"#16a34a"],["⏳","Pritje",reses.filter(r=>r.payment_status==="pritje"&&r.status!=="Anuluar").length,"#d97706"],["📤","Shpenz",exps.length,"#dc2626"]].map(([ic,lb,val,col])=>(
+            <div key={lb} style={{background:"#f8fafc",borderRadius:8,padding:"8px 4px",textAlign:"center",border:"1px solid #e2e8f0"}}>
+              <div style={{fontSize:mob?16:20,fontWeight:800,color:col}}>{val}</div>
+              <div style={{fontSize:mob?9:10,color:"#64748b",marginTop:1,fontWeight:500}}>{lb}</div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* OCCUPANCY CHART per car per month */}
       <OccupancyChart reses={reses} cars={cars} carNames={carNames}/>
     </div>
   );
 }
+
 
 function OccupancyChart({reses, cars, carNames}) {
   const now = new Date();
@@ -1739,30 +1755,56 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
     <div style={{padding:mob?10:14,maxWidth:900,margin:"0 auto"}}>
       <h2 style={{margin:"0 0 14px",fontSize:17,fontWeight:700,color:"#0f172a"}}>🏦 Arkë & Llogaritë</h2>
 
-      {/* Balanca per llogari — mobile: 1 kolone, desktop: 3 */}
-      <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"repeat(3,1fr)",gap:10,marginBottom:16}}>
-        {ACCOUNTS.map(acc=>(
-          <div key={acc.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,0.06)"}}>
-            <div style={{background:acc.bg,padding:"10px 14px",color:"#fff"}}>
-              <div style={{fontSize:12,fontWeight:800,letterSpacing:0.5}}>{acc.label}</div>
-            </div>
-            {["ALL","EUR"].map(cur=>{
-              const bal=getBalance(acc.id,cur);
-              const tabKey=acc.id+"_"+cur;
-              const isActive=arkTab===tabKey;
-              return (
-                <div key={cur} onClick={()=>setArkTab(tabKey)}
-                  style={{padding:"10px 14px",cursor:"pointer",borderBottom:"1px solid #f1f5f9",background:isActive?"#f0f9ff":"#fff",borderLeft:isActive?"3px solid "+acc.color:"3px solid transparent"}}>
-                  <div style={{fontSize:10,color:"#94a3b8",fontWeight:600}}>{cur==="ALL"?"LEKË":"EURO"}</div>
-                  <div style={{fontSize:17,fontWeight:800,color:bal>=0?acc.color:"#dc2626",marginTop:2}}>
-                    {cur==="ALL"?bal.toLocaleString("sq-AL")+" L":"€"+bal.toFixed(2)}
+      {/* Balanca per llogari — mobile: scroll horizontal, desktop: 3 kolona */}
+      {mob ? (
+        <div style={{display:"flex",gap:8,overflowX:"auto",marginBottom:12,paddingBottom:4,WebkitOverflowScrolling:"touch"}}>
+          {ACCOUNTS.map(acc=>(
+            <div key={acc.id} style={{flexShrink:0,width:160,background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,overflow:"hidden"}}>
+              <div style={{background:acc.bg,padding:"7px 10px",color:"#fff"}}>
+                <div style={{fontSize:11,fontWeight:800}}>{acc.label}</div>
+              </div>
+              {["ALL","EUR"].map(cur=>{
+                const bal=getBalance(acc.id,cur);
+                const tabKey=acc.id+"_"+cur;
+                const isActive=arkTab===tabKey;
+                return (
+                  <div key={cur} onClick={()=>setArkTab(tabKey)}
+                    style={{padding:"7px 10px",cursor:"pointer",borderBottom:"1px solid #f1f5f9",background:isActive?"#f0f9ff":"#fff",borderLeft:isActive?"3px solid "+acc.color:"3px solid transparent"}}>
+                    <div style={{fontSize:9,color:"#94a3b8",fontWeight:600}}>{cur==="ALL"?"LEKË":"EURO"}</div>
+                    <div style={{fontSize:14,fontWeight:800,color:bal>=0?acc.color:"#dc2626",marginTop:1}}>
+                      {cur==="ALL"?Math.round(bal).toLocaleString("sq-AL")+" L":"€"+bal.toFixed(2)}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        ))}
-      </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
+          {ACCOUNTS.map(acc=>(
+            <div key={acc.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,0.06)"}}>
+              <div style={{background:acc.bg,padding:"10px 14px",color:"#fff"}}>
+                <div style={{fontSize:12,fontWeight:800,letterSpacing:0.5}}>{acc.label}</div>
+              </div>
+              {["ALL","EUR"].map(cur=>{
+                const bal=getBalance(acc.id,cur);
+                const tabKey=acc.id+"_"+cur;
+                const isActive=arkTab===tabKey;
+                return (
+                  <div key={cur} onClick={()=>setArkTab(tabKey)}
+                    style={{padding:"10px 14px",cursor:"pointer",borderBottom:"1px solid #f1f5f9",background:isActive?"#f0f9ff":"#fff",borderLeft:isActive?"3px solid "+acc.color:"3px solid transparent"}}>
+                    <div style={{fontSize:10,color:"#94a3b8",fontWeight:600}}>{cur==="ALL"?"LEKË":"EURO"}</div>
+                    <div style={{fontSize:17,fontWeight:800,color:bal>=0?acc.color:"#dc2626",marginTop:2}}>
+                      {cur==="ALL"?bal.toLocaleString("sq-AL")+" L":"€"+bal.toFixed(2)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Butonat e veprimeve */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
