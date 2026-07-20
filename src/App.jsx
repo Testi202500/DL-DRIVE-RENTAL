@@ -3,7 +3,7 @@ import * as XLSX from "xlsx";
 
 // ─── MOBILE DETECTION ────────────────────────────────────────────────────────
 function useMobile() {
-  const [mob, setMob] = useState(()=>window.innerWidth<=768);
+  const [mob, setMob] = useState(()=>typeof window!=="undefined"&&window.innerWidth<=768);
   useEffect(()=>{
     const fn=()=>setMob(window.innerWidth<=768);
     window.addEventListener("resize",fn);
@@ -12,18 +12,15 @@ function useMobile() {
   return mob;
 }
 
-// Global mobile CSS injected once
+// Global mobile CSS
 const MOBILE_CSS = `
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin:0; overflow-x:hidden; }
-  input, select, textarea { font-size:16px !important; } /* Prevents iOS zoom */
+  input, select, textarea { font-size:16px !important; }
   ::-webkit-scrollbar { width:4px; height:4px; }
-  ::-webkit-scrollbar-track { background:transparent; }
   ::-webkit-scrollbar-thumb { background:#334155; border-radius:4px; }
-  .mob-grid-1 { grid-template-columns: 1fr !important; }
-  .mob-p { padding: 10px !important; }
 `;
-if(!document.getElementById("crm-mobile-css")){
+if(typeof document!=="undefined"&&!document.getElementById("crm-mobile-css")){
   const s=document.createElement("style"); s.id="crm-mobile-css"; s.textContent=MOBILE_CSS;
   document.head.appendChild(s);
 }
@@ -232,7 +229,7 @@ function DateInput({value,onChange,style}){
 
 function Fld({label,col2,children}) { return <div style={{gridColumn:col2?"span 2":"span 1"}}><label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>{label}</label>{children}</div>; }
 function Modal({title,onClose,children,wide}) {
-  const mob=useMobile();
+  const mob = window.innerWidth <= 768;
   return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:1000,display:"flex",alignItems:mob?"flex-end":"center",justifyContent:"center",padding:mob?0:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
     <div style={{background:"#fff",borderRadius:mob?"16px 16px 0 0":16,padding:mob?"16px 12px 24px":"20px 16px",width:"100%",maxWidth:mob?"100%":wide?680:520,maxHeight:mob?"92vh":"92vh",overflow:"auto",boxShadow:"0 24px 64px rgba(0,0,0,0.25)"}}>
       <div style={{display:"flex",alignItems:"center",marginBottom:14}}>
@@ -388,6 +385,9 @@ export default function App() {
     window.__sessionExpiredHandler = handleSessionExpired;
   });
 
+  // useMobile DUHET te jete para cdo return conditional (rregulli i Hooks)
+  const mob = useMobile();
+
   if (!sess) return <LoginScreen lf={lf} setLf={setLf} login={login} />;
 
   const role = sess.profile?.role || "staff";
@@ -399,7 +399,6 @@ export default function App() {
   ];
   const defPage = role==="finance"?"fin":"cal";
   const curPage = NAV.find(n=>n.id===page)?page:defPage;
-  const mob = useMobile();
 
   return (
     <div style={{minHeight:"100vh",background:"#f1f5f9",fontFamily:"'Inter',sans-serif",display:"flex",flexDirection:"column"}}>
