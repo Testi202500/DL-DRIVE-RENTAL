@@ -1,6 +1,33 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
 
+// ─── MOBILE DETECTION ────────────────────────────────────────────────────────
+function useMobile() {
+  const [mob, setMob] = useState(()=>window.innerWidth<=768);
+  useEffect(()=>{
+    const fn=()=>setMob(window.innerWidth<=768);
+    window.addEventListener("resize",fn);
+    return ()=>window.removeEventListener("resize",fn);
+  },[]);
+  return mob;
+}
+
+// Global mobile CSS injected once
+const MOBILE_CSS = `
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin:0; overflow-x:hidden; }
+  input, select, textarea { font-size:16px !important; } /* Prevents iOS zoom */
+  ::-webkit-scrollbar { width:4px; height:4px; }
+  ::-webkit-scrollbar-track { background:transparent; }
+  ::-webkit-scrollbar-thumb { background:#334155; border-radius:4px; }
+  .mob-grid-1 { grid-template-columns: 1fr !important; }
+  .mob-p { padding: 10px !important; }
+`;
+if(!document.getElementById("crm-mobile-css")){
+  const s=document.createElement("style"); s.id="crm-mobile-css"; s.textContent=MOBILE_CSS;
+  document.head.appendChild(s);
+}
+
 // ─── SUPABASE CONFIG ──────────────────────────────────────────────────────────
 const SB_URL = "https://ngpauvkegeuztpajndhu.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ncGF1dmtlZ2V1enRwYWpuZGh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3MzcxNTcsImV4cCI6MjA5ODMxMzE1N30.HXRTE9hj-CHiBZDJM5tdwqyKonlSNJnvXeJHSheaI-8";
@@ -108,11 +135,11 @@ const CAR_PALETTE = [
   {bg:"#fdf4ff",tx:"#6b21a8",ac:"#a855f7"}, {bg:"#fff7ed",tx:"#9a3412",ac:"#ea580c"},
 ];
 const SC = {
-  "Konfirmuar":{bg:"#eef1fb",tx:"#2a44ab",bd:"#d7deF5"},
-  "Aktive":    {bg:"#e9f6ef",tx:"#1a7a4c",bd:"#c9ead7"},
-  "Dorëzuar":  {bg:"#fbf2e3",tx:"#a6650a",bd:"#f3ddb3"},
-  "Përfunduar":{bg:"#f1f2f4",tx:"#464b54",bd:"#e2e4e8"},
-  "Anuluar":   {bg:"#fbecec",tx:"#b23b3b",bd:"#f2cfcf"},
+  "Konfirmuar":{bg:"#dbeafe",tx:"#1e40af",bd:"#bfdbfe"},
+  "Aktive":    {bg:"#dcfce7",tx:"#166534",bd:"#bbf7d0"},
+  "Dorëzuar":  {bg:"#fef3c7",tx:"#92400e",bd:"#fde68a"},
+  "Përfunduar":{bg:"#f3f4f6",tx:"#374151",bd:"#e5e7eb"},
+  "Anuluar":   {bg:"#fee2e2",tx:"#991b1b",bd:"#fecaca"},
 };
 const CATS = ["Mirëmbajtje","Karburant","Sigurim","Taksa","Paga","Reklamë","Zyrë","Tjetër"];
 const DAYS_SQ = ["Di","Hë","Ma","Më","En","Pë","Sh"];
@@ -132,22 +159,11 @@ function diffDays(a,b) { if(!a||!b) return 0; return Math.max(1,Math.ceil((new D
 function nowStr() { return fmtDT(new Date().toISOString()); }
 function todayY() { return toYMD(new Date()); }
 
-// ─── DESIGN TOKENS (Fleet Ops) ─────────────────────────────────────────────────
-const T = {
-  navy:"#1f2a44", navyDeep:"#161e33", ink:"#17181c", muted:"#6b6f76",
-  line:"#e6e7ea", surface:"#ffffff", bg:"#fafafa",
-  accent:"#3556d1", accentDeep:"#2a44ab", accentSoft:"#eef1fb",
-  green:"#1a7a4c", greenSoft:"#e9f6ef",
-  amber:"#a6650a", amberSoft:"#fbf2e3",
-  red:"#b23b3b", redSoft:"#fbecec",
-  fontSans:"'IBM Plex Sans',-apple-system,sans-serif",
-  fontMono:"'IBM Plex Mono',monospace",
-};
-const PB  = {padding:"9px 16px",borderRadius:7,background:T.accent,color:"#fff",border:"none",fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:T.fontSans,whiteSpace:"nowrap"};
-const CB  = {padding:"9px 16px",borderRadius:7,background:T.surface,color:T.ink,border:"1px solid "+T.line,fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:T.fontSans};
-const IB  = {padding:"6px 10px",borderRadius:6,background:T.bg,border:"1px solid "+T.line,cursor:"pointer",fontSize:13,fontFamily:T.fontSans};
-const FL  = {width:"100%",padding:"9px 11px",borderRadius:7,border:"1px solid "+T.line,fontSize:13,outline:"none",fontFamily:T.fontSans,boxSizing:"border-box",background:"#fcfcfd"};
-const NB  = {padding:"7px 14px",borderRadius:7,background:T.bg,border:"1px solid "+T.line,cursor:"pointer",fontSize:13,fontFamily:T.fontSans,fontWeight:600};
+const PB  = {padding:"8px 16px",borderRadius:8,background:"#1d4ed8",color:"#fff",border:"none",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"};
+const CB  = {padding:"8px 16px",borderRadius:8,background:"#f1f5f9",color:"#374151",border:"1px solid #e2e8f0",fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:"inherit"};
+const IB  = {padding:"6px 10px",borderRadius:7,background:"#f8fafc",border:"1px solid #e2e8f0",cursor:"pointer",fontSize:13,fontFamily:"inherit"};
+const FL  = {width:"100%",padding:"9px 11px",borderRadius:8,border:"1px solid #e2e8f0",fontSize:13,outline:"none",fontFamily:"inherit",boxSizing:"border-box",background:"#fafafa"};
+const NB  = {padding:"7px 14px",borderRadius:8,background:"#f1f5f9",border:"1px solid #e2e8f0",cursor:"pointer",fontSize:13,fontFamily:"inherit",fontWeight:600};
 
 function Badge({s}) { const c=SC[s]||{bg:"#f3f4f6",tx:"#374151"}; return <span style={{padding:"3px 9px",borderRadius:20,fontSize:11,fontWeight:700,background:c.bg,color:c.tx}}>{s}</span>; }
 function DateInput({value,onChange,style}){
@@ -216,11 +232,12 @@ function DateInput({value,onChange,style}){
 
 function Fld({label,col2,children}) { return <div style={{gridColumn:col2?"span 2":"span 1"}}><label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>{label}</label>{children}</div>; }
 function Modal({title,onClose,children,wide}) {
-  return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
-    <div style={{background:"#fff",borderRadius:16,padding:"20px 16px",width:"100%",maxWidth:wide?680:520,maxHeight:"92vh",overflow:"auto",boxShadow:"0 24px 64px rgba(0,0,0,0.25)"}}>
-      <div style={{display:"flex",alignItems:"center",marginBottom:16}}>
-        <h3 style={{margin:0,fontSize:16,fontWeight:700,color:"#0f172a",flex:1}}>{title}</h3>
-        <button onClick={onClose} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#94a3b8",lineHeight:1}}>✕</button>
+  const mob=useMobile();
+  return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:1000,display:"flex",alignItems:mob?"flex-end":"center",justifyContent:"center",padding:mob?0:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={{background:"#fff",borderRadius:mob?"16px 16px 0 0":16,padding:mob?"16px 12px 24px":"20px 16px",width:"100%",maxWidth:mob?"100%":wide?680:520,maxHeight:mob?"92vh":"92vh",overflow:"auto",boxShadow:"0 24px 64px rgba(0,0,0,0.25)"}}>
+      <div style={{display:"flex",alignItems:"center",marginBottom:14}}>
+        <h3 style={{margin:0,fontSize:15,fontWeight:700,color:"#0f172a",flex:1}}>{title}</h3>
+        <button onClick={onClose} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#94a3b8",lineHeight:1,padding:"4px 8px"}}>✕</button>
       </div>
       {children}
     </div>
@@ -375,49 +392,77 @@ export default function App() {
 
   const role = sess.profile?.role || "staff";
   const NAV = [
-    ...(role!=="finance"?[{id:"cal",lb:"📅 Kalendar"},{id:"res",lb:"📋 Rezervime"}]:[]),
-    ...(role==="admin"||role==="finance"?[{id:"fin",lb:"📊 Financa"},{id:"ark",lb:"🏦 Arkë"}]:[]),
-    ...(role!=="finance"?[{id:"rpt",lb:"📈 Raport"},{id:"srv",lb:"🔧 Servis"}]:[]),
-    ...(role==="admin"?[{id:"cli",lb:"👥 Klientët"},{id:"aud",lb:"🔍 Aktiviteti"},{id:"set",lb:"⚙️ Cilësime"}]:[]),
+    ...(role!=="finance"?[{id:"cal",lb:"📅 Kalendar",icon:"📅"},{id:"res",lb:"📋 Rezervime",icon:"📋"}]:[]),
+    ...(role==="admin"||role==="finance"?[{id:"fin",lb:"📊 Financa",icon:"📊"},{id:"ark",lb:"🏦 Arkë",icon:"🏦"}]:[]),
+    ...(role!=="finance"?[{id:"rpt",lb:"📈 Raport",icon:"📈"},{id:"srv",lb:"🔧 Servis",icon:"🔧"}]:[]),
+    ...(role==="admin"?[{id:"cli",lb:"👥 Klientët",icon:"👥"},{id:"aud",lb:"🔍 Aktiviteti",icon:"🔍"},{id:"set",lb:"⚙️ Cilësime",icon:"⚙️"}]:[]),
   ];
   const defPage = role==="finance"?"fin":"cal";
   const curPage = NAV.find(n=>n.id===page)?page:defPage;
+  const mob = useMobile();
 
   return (
-    <div style={{minHeight:"100vh",background:T.bg,fontFamily:T.fontSans,display:"flex",flexDirection:"column"}}>
-      <style>{`
-        @media (max-width: 720px){
-          .fo-tabbar{ position:fixed; bottom:0; left:0; right:0; z-index:60;
-            padding-bottom:env(safe-area-inset-bottom); justify-content:space-around; overflow-x:visible; }
-          .fo-tabbar button{ flex:1; flex-direction:column; gap:2px; padding:8px 2px 7px !important;
-            font-size:10px !important; border-bottom:none !important; border-top:2px solid transparent; }
-          .fo-tabbar button[data-active="true"]{ border-top-color:${T.accent}; }
-          .fo-content{ padding-bottom:64px; }
-        }
-      `}</style>
-      <div style={{background:T.navy,color:"#fff",padding:"0 14px",display:"flex",alignItems:"center",gap:10,height:50,flexShrink:0}}>
+    <div style={{minHeight:"100vh",background:"#f1f5f9",fontFamily:"'Inter',sans-serif",display:"flex",flexDirection:"column"}}>
+      {/* HEADER */}
+      <div style={{background:"#0a0a0a",color:"#fff",padding:"0 14px",display:"flex",alignItems:"center",gap:10,height:50,flexShrink:0,borderBottom:"1px solid rgba(201,168,76,0.22)",boxShadow:"0 2px 16px rgba(0,0,0,0.5)",position:"sticky",top:0,zIndex:200}}>
         <span style={{fontSize:20}}>🚗</span>
-        <span style={{fontWeight:700,fontSize:13,color:"#fff",letterSpacing:"-0.01em"}}>{JSON.parse(localStorage.getItem("crm_brand")||"{}").appName||"Car Rental Manager"}</span>
+        <span style={{fontWeight:800,fontSize:mob?12:13,color:"#c9a84c",letterSpacing:"0.5px"}}>{JSON.parse(localStorage.getItem("crm_brand")||"{}").appName||"Car Rental Manager"}</span>
         <div style={{flex:1}}/>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <div style={{background:"rgba(255,255,255,0.1)",borderRadius:20,padding:"3px 12px",fontSize:11,color:"#dde3f5",fontWeight:600}}>{sess.profile?.name?.split(" ")[0]}</div>
-          <button onClick={reload} title="Refresh" style={{background:"rgba(255,255,255,0.08)",border:"none",color:"#fff",borderRadius:7,padding:"6px 10px",fontSize:14,cursor:"pointer",lineHeight:1}}>↻</button>
-          <button onClick={logout} style={{background:T.accent,border:"none",color:"#fff",borderRadius:7,padding:"6px 14px",fontSize:12,cursor:"pointer",fontWeight:700,fontFamily:T.fontSans}}>Dil</button>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          {!mob&&<div style={{background:"rgba(201,168,76,0.12)",border:"1px solid rgba(201,168,76,0.22)",borderRadius:20,padding:"3px 12px",fontSize:11,color:"#c9a84c",fontWeight:600}}>{sess.profile?.name?.split(" ")[0]}</div>}
+          <button onClick={reload} title="Refresh" style={{background:"rgba(201,168,76,0.1)",border:"1px solid rgba(201,168,76,0.2)",color:"#c9a84c",borderRadius:8,padding:"6px 10px",fontSize:14,cursor:"pointer",lineHeight:1}}>↻</button>
+          <button onClick={logout} style={{background:"linear-gradient(135deg,#a07828,#c9a84c)",border:"none",color:"#0a0a0a",borderRadius:8,padding:"6px 12px",fontSize:12,cursor:"pointer",fontWeight:800}}>Dil</button>
         </div>
       </div>
-      <div className="fo-tabbar" style={{background:T.navyDeep,display:"flex",flexShrink:0,overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-        {NAV.map(n=><button key={n.id} data-active={curPage===n.id} onClick={()=>setPage(n.id)} style={{padding:"12px 14px",border:"none",background:"none",cursor:"pointer",fontWeight:curPage===n.id?700:500,fontSize:12,fontFamily:T.fontSans,color:curPage===n.id?"#fff":"#9aa3bd",borderBottom:curPage===n.id?"2px solid "+T.accent:"2px solid transparent",whiteSpace:"nowrap",flexShrink:0}}>{n.lb}</button>)}
+
+      {/* NAV — horizontal scroll, punon mire ne mobile dhe desktop */}
+      <div style={{
+        background:"#111",
+        borderBottom:"1px solid rgba(201,168,76,0.18)",
+        display:"flex",
+        flexShrink:0,
+        overflowX:"auto",
+        WebkitOverflowScrolling:"touch",
+        scrollbarWidth:"none",
+        msOverflowStyle:"none",
+        position:"sticky",
+        top:50,
+        zIndex:199,
+      }}>
+        <style>{`.nav-scroll::-webkit-scrollbar{display:none}`}</style>
+        <div className="nav-scroll" style={{display:"flex",width:"100%",overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+          {NAV.map(n=>(
+            <button key={n.id} onClick={()=>setPage(n.id)} style={{
+              padding: mob ? "14px 16px" : "12px 14px",
+              border:"none",
+              background:"none",
+              cursor:"pointer",
+              fontWeight:curPage===n.id?700:500,
+              fontSize: mob ? 13 : 12,
+              fontFamily:"inherit",
+              color:curPage===n.id?"#c9a84c":"#6b6b6b",
+              borderBottom:curPage===n.id?"3px solid #c9a84c":"3px solid transparent",
+              whiteSpace:"nowrap",
+              flexShrink:0,
+              minWidth: mob ? 80 : "auto",
+              WebkitTapHighlightColor:"transparent",
+              transition:"color 0.15s",
+            }}>{n.lb}</button>
+          ))}
+        </div>
       </div>
-      {/* Notification permission banner */}
+
+      {/* Notification banner */}
       {"Notification" in window && Notification.permission==="default" && (
-        <div style={{background:T.accentSoft,borderBottom:"1px solid "+T.line,padding:"8px 16px",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+        <div style={{background:"#1a1500",borderBottom:"1px solid rgba(201,168,76,0.25)",padding:"8px 16px",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
           <span style={{fontSize:13}}>🔔</span>
-          <span style={{fontSize:12,color:T.accentDeep,flex:1}}>Aktivizo njoftimet për kujtesa dorëzimi/marrjeje</span>
-          <button onClick={()=>Notification.requestPermission()} style={{background:T.accent,border:"none",color:"#fff",borderRadius:7,padding:"5px 12px",fontSize:12,cursor:"pointer",fontWeight:700,fontFamily:T.fontSans}}>Aktivizo</button>
+          <span style={{fontSize:12,color:"#c9a84c",flex:1}}>Aktivizo njoftimet</span>
+          <button onClick={()=>Notification.requestPermission()} style={{background:"linear-gradient(135deg,#a07828,#c9a84c)",border:"none",color:"#0a0a0a",borderRadius:7,padding:"5px 12px",fontSize:12,cursor:"pointer",fontWeight:700}}>Aktivizo</button>
         </div>
       )}
-      <div className="fo-content" style={{flex:1,overflow:"auto"}}>
 
+      {/* MAIN CONTENT */}
+      <div style={{flex:1,overflow:"auto"}}>
         {curPage==="cal" && <CalPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
         {curPage==="res" && <ResPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
         {curPage==="fin" && <FinPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
@@ -439,48 +484,67 @@ function LoginScreen({lf,setLf,login}) {
   const logoUrl = brand.logoUrl || "";
   const appName = brand.appName || "Car Rental Manager";
   return (
-    <div style={{minHeight:"100vh",fontFamily:T.fontSans,position:"relative",overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center",background:T.navyDeep}}>
-      {/* Subtle indigo glow, restrained */}
-      <div style={{position:"absolute",top:"-15%",right:"-10%",width:520,height:520,borderRadius:"50%",background:"radial-gradient(circle,rgba(53,86,209,0.16) 0%,transparent 65%)",pointerEvents:"none"}}/>
-      <div style={{position:"absolute",bottom:"-15%",left:"-10%",width:420,height:420,borderRadius:"50%",background:"radial-gradient(circle,rgba(53,86,209,0.10) 0%,transparent 65%)",pointerEvents:"none"}}/>
+    <div style={{minHeight:"100vh",fontFamily:"'Inter',sans-serif",position:"relative",overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      {/* Black base */}
+      <div style={{position:"absolute",inset:0,background:"#0a0a0a"}}/>
+      {/* Gold radial glow top-right */}
+      <div style={{position:"absolute",top:"-10%",right:"-5%",width:560,height:560,borderRadius:"50%",background:"radial-gradient(circle,rgba(201,168,76,0.2) 0%,rgba(201,168,76,0.07) 40%,transparent 70%)",pointerEvents:"none"}}/>
+      {/* Subtle gold glow bottom-left */}
+      <div style={{position:"absolute",bottom:"-10%",left:"-5%",width:400,height:400,borderRadius:"50%",background:"radial-gradient(circle,rgba(201,168,76,0.12) 0%,transparent 65%)",pointerEvents:"none"}}/>
+      {/* Very subtle center glow */}
+      <div style={{position:"absolute",top:"30%",left:"50%",transform:"translateX(-50%)",width:600,height:300,borderRadius:"50%",background:"radial-gradient(ellipse,rgba(201,168,76,0.05) 0%,transparent 70%)",pointerEvents:"none"}}/>
+
+      {/* Gold top line */}
+      <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"linear-gradient(90deg,transparent,#c9a84c,#e8c96a,#c9a84c,transparent)"}}/>
 
       {/* Card */}
-      <div style={{position:"relative",zIndex:1,background:T.surface,border:"1px solid "+T.line,borderRadius:14,padding:"36px 30px",width:"100%",maxWidth:380,boxShadow:"0 24px 64px rgba(0,0,0,0.35)",margin:16}}>
+      <div style={{position:"relative",zIndex:1,background:"rgba(18,18,18,0.92)",backdropFilter:"blur(24px)",border:"1px solid rgba(201,168,76,0.28)",borderRadius:20,padding:"40px 32px",width:"100%",maxWidth:380,boxShadow:"0 40px 80px rgba(0,0,0,0.8), 0 0 60px rgba(201,168,76,0.07)",margin:16}}>
 
-        <div style={{textAlign:"center",marginBottom:28}}>
+        {/* Gold accent top bar on card */}
+        <div style={{position:"absolute",top:0,left:"20%",right:"20%",height:1,background:"linear-gradient(90deg,transparent,rgba(201,168,76,0.7),transparent)",borderRadius:1}}/>
+
+        <div style={{textAlign:"center",marginBottom:32}}>
           {logoUrl
-            ? <img src={logoUrl} alt="logo" style={{width:64,height:64,borderRadius:12,objectFit:"cover",margin:"0 auto 14px",display:"block",border:"1px solid "+T.line}}/>
-            : <div style={{width:64,height:64,borderRadius:12,background:T.navy,display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,margin:"0 auto 14px"}}>🚗</div>
+            ? <img src={logoUrl} alt="logo" style={{width:76,height:76,borderRadius:16,objectFit:"cover",margin:"0 auto 16px",display:"block",boxShadow:"0 8px 32px rgba(201,168,76,0.28),0 0 0 2px rgba(201,168,76,0.22)"}}/>
+            : <div style={{width:76,height:76,borderRadius:18,background:"linear-gradient(135deg,#1c1c1c,#252520)",border:"2px solid rgba(201,168,76,0.45)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:34,margin:"0 auto 16px",boxShadow:"0 8px 32px rgba(201,168,76,0.22),0 0 0 4px rgba(201,168,76,0.09)"}}>🚗</div>
           }
-          <h1 style={{color:T.ink,margin:0,fontSize:19,fontWeight:700,letterSpacing:"-0.01em"}}>{appName}</h1>
-          <div style={{color:T.muted,fontSize:11,letterSpacing:1,fontWeight:600,textTransform:"uppercase",marginTop:6}}>Menaxhim Flote</div>
+          <h1 style={{color:"#c9a84c",margin:0,fontSize:22,fontWeight:800,letterSpacing:"0.5px",textShadow:"0 0 30px rgba(201,168,76,0.45)"}}>{appName}</h1>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginTop:8}}>
+            <div style={{width:24,height:1,background:"linear-gradient(90deg,transparent,rgba(212,175,55,0.5))"}}/>
+            <span style={{color:"#7a6a3a",fontSize:11,letterSpacing:2,fontWeight:600,textTransform:"uppercase"}}>Menaxhim Makinash</span>
+            <div style={{width:24,height:1,background:"linear-gradient(90deg,rgba(212,175,55,0.5),transparent)"}}/>
+          </div>
         </div>
 
-        <div style={{marginBottom:14}}>
-          <label style={{color:T.muted,fontSize:11,fontWeight:600,display:"block",marginBottom:6}}>Email</label>
+        <div style={{marginBottom:16}}>
+          <label style={{color:"#8a7a45",fontSize:10,fontWeight:700,letterSpacing:2,display:"block",marginBottom:7,textTransform:"uppercase"}}>Email</label>
           <input value={lf.email} onChange={e=>setLf(f=>({...f,email:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&login()}
-            placeholder="email@kompania.al" type="email" style={FL}/>
+            placeholder="email@kompania.al" type="email"
+            style={{width:"100%",padding:"13px 14px",borderRadius:10,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(201,168,76,0.22)",color:"#dcc88a",fontSize:14,outline:"none",boxSizing:"border-box",fontFamily:"inherit",transition:"border 0.2s"}}/>
         </div>
         <div style={{marginBottom:10}}>
-          <label style={{color:T.muted,fontSize:11,fontWeight:600,display:"block",marginBottom:6}}>Fjalëkalimi</label>
+          <label style={{color:"#8a7a45",fontSize:10,fontWeight:700,letterSpacing:2,display:"block",marginBottom:7,textTransform:"uppercase"}}>Fjalëkalimi</label>
           <div style={{position:"relative"}}>
             <input type={showPass?"text":"password"} value={lf.password} onChange={e=>setLf(f=>({...f,password:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&login()}
-              placeholder="••••••••" style={{...FL,paddingRight:40}}/>
-            <button type="button" onClick={()=>setShowPass(s=>!s)} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:T.muted,fontSize:16,padding:4}}>
+              placeholder="••••••••"
+              style={{width:"100%",padding:"13px 40px 13px 14px",borderRadius:10,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(201,168,76,0.22)",color:"#dcc88a",fontSize:14,outline:"none",boxSizing:"border-box",fontFamily:"inherit"}}/>
+            <button type="button" onClick={()=>setShowPass(s=>!s)} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#8a7a45",fontSize:16,padding:4}}>
               {showPass?"🙈":"👁️"}
             </button>
           </div>
         </div>
 
-        {lf.err&&<div style={{background:T.redSoft,border:"1px solid #f2cfcf",color:T.red,borderRadius:7,padding:"9px 12px",fontSize:12,marginTop:8}}>⚠️ {lf.err}</div>}
+        {lf.err&&<div style={{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.25)",color:"#fca5a5",borderRadius:8,padding:"9px 12px",fontSize:12,marginTop:8}}>⚠️ {lf.err}</div>}
 
         <button type="button" onClick={login} disabled={lf.loading}
-          style={{width:"100%",marginTop:20,padding:"13px",borderRadius:8,background:T.accent,color:"#fff",border:"none",fontWeight:700,fontSize:14,cursor:lf.loading?"not-allowed":"pointer",opacity:lf.loading?0.7:1,fontFamily:T.fontSans}}>
+          style={{width:"100%",marginTop:22,padding:"14px",borderRadius:11,background:"linear-gradient(135deg,#a07828 0%,#c9a84c 35%,#e0b95a 55%,#c9a84c 75%,#a07828 100%)",color:"#0a0a0a",border:"none",fontWeight:800,fontSize:15,cursor:lf.loading?"not-allowed":"pointer",opacity:lf.loading?0.7:1,boxShadow:"0 6px 24px rgba(201,168,76,0.32),0 2px 8px rgba(0,0,0,0.5)",letterSpacing:"0.5px"}}>
           {lf.loading?"Duke hyrë...":"Hyr →"}
         </button>
 
-        <div style={{marginTop:24,textAlign:"center"}}>
-          <span style={{fontSize:11,color:"#b6b9c0"}}>© {new Date().getFullYear()}</span>
+        <div style={{marginTop:28,display:"flex",alignItems:"center",gap:10}}>
+          <div style={{flex:1,height:1,background:"rgba(201,168,76,0.13)"}}/>
+          <span style={{fontSize:10,color:"#4a4030",letterSpacing:1}}>© {new Date().getFullYear()}</span>
+          <div style={{flex:1,height:1,background:"rgba(201,168,76,0.13)"}}/>
         </div>
       </div>
     </div>
@@ -489,6 +553,7 @@ function LoginScreen({lf,setLf,login}) {
 
 // ─── CALENDAR ────────────────────────────────────────────────────────────────
 function CalPage({sess,reload,reloadTick,addLog}) {
+  const mob=useMobile();
   const [start,setStart]=useState(todayY());
   const [ndays,setNdays]=useState(30);
   const [det,setDet]=useState(null);
@@ -531,22 +596,24 @@ function CalPage({sess,reload,reloadTick,addLog}) {
   if(loading) return <Spin/>;
 
   return (
-    <div style={{padding:14,background:"#f8fafc",minHeight:"100%"}}>
-      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
-        <div><h2 style={{margin:0,fontSize:18,fontWeight:800,color:"#0f172a"}}>📅 Disponueshmëria</h2><p style={{margin:"2px 0 0",fontSize:12,color:"#94a3b8"}}>Kliko rezervim për detaje · {cars.length} makina</p></div>
+    <div style={{padding:mob?6:14,background:"#f8fafc",minHeight:"100%"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+        <div><h2 style={{margin:0,fontSize:mob?15:18,fontWeight:800,color:"#0f172a"}}>📅 Disponueshmëria</h2><p style={{margin:"2px 0 0",fontSize:11,color:"#94a3b8"}}>{cars.length} makina</p></div>
         <div style={{flex:1}}/>
         <div style={{display:"flex",gap:6,alignItems:"center",background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"4px 6px"}}>
           <button onClick={()=>setStart(addD(start,-ndays))} style={{border:"none",background:"#f1f5f9",borderRadius:7,width:28,height:28,cursor:"pointer",fontSize:14,fontWeight:700}}>‹</button>
-          <button onClick={()=>{setStart(todayY());setNdays(30);}} style={{border:"none",background:"#1d4ed8",borderRadius:7,padding:"0 12px",height:28,cursor:"pointer",fontSize:12,fontWeight:700,color:"#fff"}}>Sot</button>
+          <button onClick={()=>{setStart(todayY());setNdays(30);}} style={{border:"none",background:"#1d4ed8",borderRadius:7,padding:"0 10px",height:28,cursor:"pointer",fontSize:11,fontWeight:700,color:"#fff"}}>Sot</button>
           <button onClick={()=>setStart(addD(start,ndays))} style={{border:"none",background:"#f1f5f9",borderRadius:7,width:28,height:28,cursor:"pointer",fontSize:14,fontWeight:700}}>›</button>
         </div>
-        <div style={{display:"flex",gap:5,alignItems:"center",background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"5px 8px"}}>
-          <span style={{fontSize:11,color:"#64748b",fontWeight:600}}>Nga</span>
-          <DateInput value={customFrom} onChange={setCustomFrom} style={{border:"1px solid #e2e8f0",borderRadius:6,padding:"4px 6px",fontSize:12,fontFamily:"inherit",width:100}}/>
-          <span style={{fontSize:11,color:"#64748b",fontWeight:600}}>Deri</span>
-          <DateInput value={customTo} onChange={setCustomTo} style={{border:"1px solid #e2e8f0",borderRadius:6,padding:"4px 6px",fontSize:12,fontFamily:"inherit",width:100}}/>
-          <button onClick={applyCustomRange} style={{border:"none",background:"#059669",borderRadius:6,padding:"5px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:"#fff"}}>✓ Shiko</button>
-        </div>
+        {!mob&&(
+          <div style={{display:"flex",gap:5,alignItems:"center",background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"5px 8px"}}>
+            <span style={{fontSize:11,color:"#64748b",fontWeight:600}}>Nga</span>
+            <DateInput value={customFrom} onChange={setCustomFrom} style={{border:"1px solid #e2e8f0",borderRadius:6,padding:"4px 6px",fontSize:12,fontFamily:"inherit",width:100}}/>
+            <span style={{fontSize:11,color:"#64748b",fontWeight:600}}>Deri</span>
+            <DateInput value={customTo} onChange={setCustomTo} style={{border:"1px solid #e2e8f0",borderRadius:6,padding:"4px 6px",fontSize:12,fontFamily:"inherit",width:100}}/>
+            <button onClick={applyCustomRange} style={{border:"none",background:"#059669",borderRadius:6,padding:"5px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:"#fff"}}>✓</button>
+          </div>
+        )}
       </div>
 
       <div style={{overflowX:"auto",overflowY:"auto",maxHeight:"75vh",borderRadius:14,boxShadow:"0 4px 24px rgba(15,23,42,0.10)",border:"1px solid #d1d5db",WebkitOverflowScrolling:"touch",background:"#fff"}}>
@@ -990,6 +1057,7 @@ function DetModal({r,sess,addLog,reload,onClose,onUpd,cars,reses}) {
 
 // ─── RESERVATIONS ─────────────────────────────────────────────────────────────
 function ResPage({sess,reload,reloadTick,addLog}) {
+  const mob=useMobile();
   const [reses,setReses]=useState([]);
   const [cars,setCars]=useState([]);
   const [clients,setClients]=useState([]);
@@ -1122,7 +1190,7 @@ function ResPage({sess,reload,reloadTick,addLog}) {
   if(err) return <Err msg={err} onRetry={reload}/>;
 
   return (
-    <div style={{padding:14,maxWidth:1100,margin:"0 auto"}}>
+    <div style={{padding:mob?10:14,maxWidth:1100,margin:"0 auto"}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12,flexWrap:"wrap"}}>
         <h2 style={{margin:0,fontSize:17,fontWeight:700,color:"#0f172a",flex:1}}>📋 Rezervimet</h2>
         <input value={srch} onChange={e=>setSrch(e.target.value)} placeholder="Kërko..." style={{padding:"7px 11px",borderRadius:8,border:"1px solid #e2e8f0",fontSize:13,width:160,fontFamily:"inherit"}}/>
@@ -1170,7 +1238,7 @@ function ResPage({sess,reload,reloadTick,addLog}) {
       }
 
       {showF&&<Modal title={editId?"Ndrysho Rezervim":"Rezervim i Ri"} onClose={()=>setShowF(false)} wide>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:10}}>
           <Fld label="Klienti *" col2>
             <input value={form.client_name} onChange={e=>setForm(f=>({...f,client_name:e.target.value}))} style={FL} placeholder="Emri Mbiemri" list="clients-list"/>
             <datalist id="clients-list">{clients.map(c=><option key={c.id} value={c.name}/>)}</datalist>
@@ -1241,6 +1309,7 @@ function ResPage({sess,reload,reloadTick,addLog}) {
 
 // ─── FINANCE ─────────────────────────────────────────────────────────────────
 function FinPage({sess,reload,reloadTick,addLog}) {
+  const mob=useMobile();
   const [reses,setReses]=useState([]);
   const [exps,setExps]=useState([]);
   const [cars,setCars]=useState([]);
@@ -1293,9 +1362,9 @@ function FinPage({sess,reload,reloadTick,addLog}) {
   const maxInc=Math.max(...carNames.map(cn=>paid.filter(r=>r.car_name===cn).reduce((s,r)=>s+Number(r.amount_paid)*(r.currency==="EUR"?108:1),0)),1);
 
   return (
-    <div style={{padding:14,maxWidth:1000,margin:"0 auto"}}>
+    <div style={{padding:mob?10:14,maxWidth:1000,margin:"0 auto"}}>
       <h2 style={{margin:"0 0 16px",fontSize:17,fontWeight:700,color:"#0f172a"}}>📊 Raportet Financiare</h2>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginBottom:16}}>
+      <div style={{display:"grid",gridTemplateColumns:mob?"1fr 1fr":"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginBottom:16}}>
         {[["#0f172a","🇦🇱 LEKË",incL,expL,true],["#064e3b","🇪🇺 EURO",incE,expE,false]].map(([hbg,title,inc,exp,isL],i)=>(
           <div key={i} style={{background:"#fff",border:"2px solid #e2e8f0",borderRadius:14,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,0.06)"}}>
             <div style={{background:hbg,color:"#fff",padding:"10px 16px",fontWeight:700,fontSize:14}}>{title}</div>
@@ -1514,6 +1583,7 @@ const ACC_ID = a => a?.method||"cash";
 const ACC_INFO = id => ACCOUNTS.find(a=>a.id===id)||ACCOUNTS[0];
 
 function ArkPage({sess,reload,reloadTick,addLog}) {
+  const mob=useMobile();
   const [ledger,setLedger]=useState([]);
   const [exps,setExps]=useState([]);
   const [cars,setCars]=useState([]);
@@ -1602,7 +1672,8 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
     const a=Number(ef.amount);
     const finalCat = ef.category==="__custom__" ? ef.catCustom||"Tjetër" : ef.category;
     try {
-      await sbAuthPost("expenses",{...ef,category:finalCat,amount:a,created_by:sess.profile?.username},sess.token);
+      const {catCustom, ...efClean} = ef;
+      await sbAuthPost("expenses",{...efClean,category:finalCat,amount:a,created_by:sess.profile?.username},sess.token);
       await sbAuthPost("cash_ledger",{currency:ef.currency,amount:-a,method:ef.method,type:"expense",description:"Shpenzim: "+ef.description+(ef.car_name?" ("+ef.car_name+")":""),created_by:sess.profile?.username},sess.token);
       addLog("Shto Shpenzim ("+ACC_INFO(ef.method).label+")",ef.description+" "+fmtM(a,ef.currency));
       reload(); setShowE(false); setEf({description:"",amount:"",currency:"ALL",method:"cash",category:"Mirëmbajtje",catCustom:"",car_name:"",expense_date:todayY()});
@@ -1657,11 +1728,11 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
   const carNames=cars.map(c=>c.name);
 
   return (
-    <div style={{padding:14,maxWidth:900,margin:"0 auto"}}>
+    <div style={{padding:mob?10:14,maxWidth:900,margin:"0 auto"}}>
       <h2 style={{margin:"0 0 14px",fontSize:17,fontWeight:700,color:"#0f172a"}}>🏦 Arkë & Llogaritë</h2>
 
-      {/* Balanca per llogari — 3 llogari x 2 monedha = 6 karta */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
+      {/* Balanca per llogari — mobile: 1 kolone, desktop: 3 */}
+      <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"repeat(3,1fr)",gap:10,marginBottom:16}}>
         {ACCOUNTS.map(acc=>(
           <div key={acc.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,0.06)"}}>
             <div style={{background:acc.bg,padding:"10px 14px",color:"#fff"}}>
@@ -1686,7 +1757,7 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
       </div>
 
       {/* Butonat e veprimeve */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
         <button onClick={()=>{setAf(f=>({...f,type:"in"}));setShowA(true)}} style={{...PB,width:"100%",fontSize:12,padding:"8px 4px"}}>📥 Hyrje</button>
         <button onClick={()=>{setAf(f=>({...f,type:"out"}));setShowA(true)}} style={{...PB,background:"#dc2626",width:"100%",fontSize:12,padding:"8px 4px"}}>📤 Dalje</button>
         <button onClick={()=>setShowT(true)} style={{...PB,background:"#7c3aed",width:"100%",fontSize:12,padding:"8px 4px"}}>🔄 Kalim Monedhë</button>
@@ -1875,6 +1946,7 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
 
 // ─── CLIENTS ──────────────────────────────────────────────────────────────────
 function CliPage({sess,reload,reloadTick,addLog}) {
+  const mob=useMobile();
   const [clients,setClients]=useState([]);
   const [reses,setReses]=useState([]);
   const [loading,setLoading]=useState(true);
@@ -1917,7 +1989,7 @@ function CliPage({sess,reload,reloadTick,addLog}) {
   const filteredFinal=onlyDebt?filtered.filter(cl=>{const s=clientStats(cl);return s.detL>0||s.detE>0;}):filtered;
 
   return (
-    <div style={{padding:14,maxWidth:800,margin:"0 auto"}}>
+    <div style={{padding:mob?10:14,maxWidth:800,margin:"0 auto"}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
         <h2 style={{margin:0,fontSize:17,fontWeight:700,color:"#0f172a",flex:1}}>👥 Klientët</h2>
         <label style={{display:"flex",alignItems:"center",gap:5,fontSize:12,color:"#dc2626",fontWeight:600,cursor:"pointer"}}>
@@ -1961,7 +2033,7 @@ function CliPage({sess,reload,reloadTick,addLog}) {
         })
       }
       {showF&&<Modal title={editId?"Ndrysho Klient":"Klient i Ri"} onClose={()=>{setShowF(false);setEditId(null);}}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:10}}>
           <Fld label="Emri *" col2><input value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} style={FL} placeholder="Emri Mbiemri"/></Fld>
           <Fld label="Telefoni"><input value={form.phone} onChange={e=>setForm(f=>({...f,phone:e.target.value}))} style={FL} placeholder="+355 6X XXX XXXX"/></Fld>
           <Fld label="Email"><input value={form.email} onChange={e=>setForm(f=>({...f,email:e.target.value}))} style={FL} placeholder="email@..."/></Fld>
@@ -2919,6 +2991,7 @@ function FinanceReport({cars,ledger,reses,view}){
 
 // ─── SERVIS PAGE ──────────────────────────────────────────────────────────────
 function SrvPage({sess,reload,reloadTick,addLog}) {
+  const mob=useMobile();
   const [cars,setCars]=useState([]);
   const [services,setServices]=useState([]);
   const [reses,setReses]=useState([]);
@@ -3149,7 +3222,7 @@ function SrvPage({sess,reload,reloadTick,addLog}) {
   const selCurKm=selCar?currentKm(selCar):0;
 
   return (
-    <div style={{padding:14,maxWidth:1000,margin:"0 auto"}}>
+    <div style={{padding:mob?10:14,maxWidth:1000,margin:"0 auto"}}>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
         <h2 style={{margin:0,fontSize:17,fontWeight:700,color:"#0f172a",flex:1}}>🔧 Servis & Dokumenta</h2>
         <span style={{fontSize:12,color:"#94a3b8"}}>{cars.length} makina</span>
@@ -3283,6 +3356,7 @@ function SrvPage({sess,reload,reloadTick,addLog}) {
 
 // ─── AUDIT ────────────────────────────────────────────────────────────────────
 function AudPage({sess,reloadTick}) {
+  const mob=useMobile();
   const [log,setLog]=useState([]);
   const [srch,setSrch]=useState("");
   const [loading,setLoading]=useState(true);
@@ -3296,7 +3370,7 @@ function AudPage({sess,reloadTick}) {
 
   if(loading) return <Spin/>;
   return (
-    <div style={{padding:14,maxWidth:860,margin:"0 auto"}}>
+    <div style={{padding:mob?10:14,maxWidth:860,margin:"0 auto"}}>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
         <h2 style={{margin:0,fontSize:17,fontWeight:700,color:"#0f172a",flex:1}}>🔍 Aktiviteti</h2>
         <input value={srch} onChange={e=>setSrch(e.target.value)} placeholder="Kërko..." style={{padding:"7px 11px",borderRadius:8,border:"1px solid #e2e8f0",fontSize:13,width:190,fontFamily:"inherit"}}/>
@@ -3321,6 +3395,7 @@ function AudPage({sess,reloadTick}) {
 
 // ─── SETTINGS ────────────────────────────────────────────────────────────────
 function SetPage({sess,reload,addLog}) {
+  const mob=useMobile();
   const [tab,setTab]=useState("brand");
   const [cars,setCars]=useState([]);
   const [users,setUsers]=useState([]);
@@ -3464,7 +3539,7 @@ function SetPage({sess,reload,addLog}) {
   if(loading) return <Spin/>;
 
   return (
-    <div style={{padding:14,maxWidth:780,margin:"0 auto"}}>
+    <div style={{padding:mob?10:14,maxWidth:780,margin:"0 auto"}}>
       <h2 style={{margin:"0 0 14px",fontSize:17,fontWeight:700,color:"#0f172a"}}>⚙️ Cilësime</h2>
       <div style={{display:"flex",gap:0,borderBottom:"2px solid #e2e8f0",marginBottom:16,overflowX:"auto"}}>
         {[["brand","🎨 Branding"],["cars","🚗 Makinat"],["users","👤 Përdoruesit"]].map(([id,lb])=>(
