@@ -1080,7 +1080,7 @@ function ResPage({sess,reload,reloadTick,addLog}) {
   const [detId,setDetId]=useState(null);
   const [filt,setFilt]=useState("all");
   const [srch,setSrch]=useState("");
-  const empty={car_name:"",car_id:"",client_name:"",client_phone:"",client_id_card:"",date_from:"",date_to:"",pickup_time:"10:00",return_time:"10:00",price_per_day:"",currency:"ALL",total_price:"",prepayment:"",prepayment_method:"cash",status:"Konfirmuar",payment_status:"pritje",notes:""};
+  const empty={car_name:"",car_id:"",client_name:"",client_phone:"",client_id_card:"",date_from:"",date_to:"",pickup_time:"10:00",return_time:"10:00",price_per_day:"",currency:"ALL",total_price:"",prepayment:null,prepayment_method:"cash",status:"Konfirmuar",payment_status:"pritje",notes:""};
   const [form,setForm]=useState(empty);
   const nd=diffDays(form.date_from,form.date_to);
 
@@ -1135,7 +1135,15 @@ function ResPage({sess,reload,reloadTick,addLog}) {
         alert(msg);
         return;
       }
-      const body={...form,car_id:form.car_id||null,price_per_day:Number(form.price_per_day),total_price:Number(form.total_price),created_by:sess.profile?.username};
+      // Nderto body pa fushat qe nuk duhen ne tabele
+      const {prepayment, prepayment_method, ...formRest} = form;
+      const body={
+        ...formRest,
+        car_id:form.car_id||null,
+        price_per_day:Number(form.price_per_day)||0,
+        total_price:Number(form.total_price)||0,
+        created_by:sess.profile?.username
+      };
       if(editId){
         await sbAuthPatch("reservations",editId,body,sess.token);
         addLog("Ndrysho Rezervim",form.car_name+" - "+form.client_name);
