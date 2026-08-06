@@ -828,19 +828,25 @@ function DetModal({r,sess,addLog,reload,onClose,onUpd,cars,reses}) {
     addLog("Dorëzim",cur.car_name+" → "+cur.client_name+(kmOut?" · "+kmOut+" km":""));
   }
   async function doCollect(){
-    // Mos shto ne arke nese eshte paguar tashme
     if(cur.payment_status==="paguar") return;
-    const now=new Date().toISOString();
-    const remaining=Number(cur.total_price)-Number(cur.amount_paid||0);
-    await patch({payment_status:"paguar",paid_at:now,paid_by:sess.profile?.username,amount_paid:cur.total_price});
-    await addToLedger(remaining,cur.currency,"payment","Pagesë ("+METHOD_LB[payMethod]+"): "+cur.car_name+" - "+cur.client_name,null,payMethod);
-    addLog("Arkëtim",cur.car_name+" "+fmtM(remaining,cur.currency)+" · "+METHOD_LB[payMethod]);
+    if(saving) return;
+    setSaving(true);
+    try {
+      const now=new Date().toISOString();
+      const remaining=Number(cur.total_price)-Number(cur.amount_paid||0);
+      if(remaining<=0){ setSaving(false); return; }
+      await patch({payment_status:"paguar",paid_at:now,paid_by:sess.profile?.username,amount_paid:cur.total_price});
+      await addToLedger(remaining,cur.currency,"payment","Pagesë ("+METHOD_LB[payMethod]+"): "+cur.car_name+" - "+cur.client_name,null,payMethod);
+      addLog("Arkëtim",cur.car_name+" "+fmtM(remaining,cur.currency)+" · "+METHOD_LB[payMethod]);
+    } catch(e){alert(e.message);}
+    setSaving(false);
   }
   const [partAmt,setPartAmt]=useState("");
   const [collecting,setCollecting]=useState(false);
   async function doCollectPart(){
     const a=Number(partAmt);
     if(!a||a<=0) return;
+    if(collecting) return;
     setCollecting(true);
     try {
       const newPaid=Number(cur.amount_paid||0)+a;
@@ -856,13 +862,18 @@ function DetModal({r,sess,addLog,reload,onClose,onUpd,cars,reses}) {
     setCollecting(false);
   }
   async function doDeliverPay(){
-    // Mos shto ne arke nese eshte paguar tashme
     if(cur.payment_status==="paguar") return;
-    const now=new Date().toISOString(), time=new Date().toTimeString().slice(0,5);
-    const remaining=Number(cur.total_price)-Number(cur.amount_paid||0);
-    await patch({status:"Dorëzuar",deliv_at:now,deliv_by:sess.profile?.username,deliv_time:time,payment_status:"paguar",paid_at:now,paid_by:sess.profile?.username,amount_paid:cur.total_price,km_out:kmOut?Number(kmOut):null});
-    await addToLedger(remaining,cur.currency,"payment","Pagesë ("+METHOD_LB[payMethod]+"): "+cur.car_name+" - "+cur.client_name,null,payMethod);
-    addLog("Dorëzim+Arkëtim",cur.car_name+" "+fmtM(remaining,cur.currency)+(kmOut?" · "+kmOut+" km":"")+" · "+METHOD_LB[payMethod]);
+    if(saving) return;
+    setSaving(true);
+    try {
+      const now=new Date().toISOString(), time=new Date().toTimeString().slice(0,5);
+      const remaining=Number(cur.total_price)-Number(cur.amount_paid||0);
+      if(remaining<=0){ setSaving(false); return; }
+      await patch({status:"Dorëzuar",deliv_at:now,deliv_by:sess.profile?.username,deliv_time:time,payment_status:"paguar",paid_at:now,paid_by:sess.profile?.username,amount_paid:cur.total_price,km_out:kmOut?Number(kmOut):null});
+      await addToLedger(remaining,cur.currency,"payment","Pagesë ("+METHOD_LB[payMethod]+"): "+cur.car_name+" - "+cur.client_name,null,payMethod);
+      addLog("Dorëzim+Arkëtim",cur.car_name+" "+fmtM(remaining,cur.currency)+(kmOut?" · "+kmOut+" km":"")+" · "+METHOD_LB[payMethod]);
+    } catch(e){alert(e.message);}
+    setSaving(false);
   }
   const depCur = depTx.length ? depTx[depTx.length-1].currency : depCurrency;
   const depositHeld = depTx.filter(t=>t.type==="deposit_in").reduce((s,t)=>s+Number(t.amount),0) + depTx.filter(t=>t.type==="deposit_out").reduce((s,t)=>s+Number(t.amount),0);
@@ -1638,10 +1649,11 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
     return ledger.filter(l=>(l.method||"cash")===method&&l.currency===currency).reduce((s,l)=>s+Number(l.amount),0);
   }
 
+  const [submitting,setSubmitting]=useState(false);
   async function doAdd(){
-    if(!af.amount) return;
+    if(!af.amount||submitting) return;
+    setSubmitting(true);
     const a=Number(af.amount)*(af.type==="in"?1:-1);
-    // Nese eshte hyrje dhe lidhet me rezervim
     const selRes = af.linkRes&&af.resId ? reses.find(r=>r.id===af.resId) : null;
     const desc = selRes
       ? `Arkëtim (${ACC_INFO(af.method).label}): ${selRes.car_name} - ${selRes.client_name}`
@@ -1654,7 +1666,6 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
         reference_id:selRes?.id||null,
         created_by:sess.profile?.username
       },sess.token);
-      // Perditeso amount_paid ne rezervim nese eshte lidhur
       if(selRes&&af.type==="in"){
         const newPaid=Number(selRes.amount_paid||0)+Number(af.amount);
         const isFull=newPaid>=Number(selRes.total_price);
@@ -1670,6 +1681,7 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
       setShowA(false);
       setAf({amount:"",currency:"ALL",method:"cash",description:"",type:"in",linkRes:false,resId:""});
     } catch(e){alert(e.message);}
+    setSubmitting(false);
   }
 
   async function doTransfer(){
@@ -1946,7 +1958,7 @@ function ArkPage({sess,reload,reloadTick,addLog}) {
           </div>
           <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
             <button onClick={()=>setShowA(false)} style={CB}>Anulo</button>
-            <button onClick={doAdd} disabled={af.linkRes&&!af.resId} style={{...PB,opacity:af.linkRes&&!af.resId?0.5:1}}>✅ Konfirmo</button>
+            <button onClick={doAdd} disabled={af.linkRes&&!af.resId||submitting} style={{...PB,opacity:af.linkRes&&!af.resId||submitting?0.5:1}}>{submitting?"⏳ Duke ruajtur...":"✅ Konfirmo"}</button>
           </div>
         </Modal>
         );
