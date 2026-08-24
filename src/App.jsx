@@ -369,65 +369,189 @@ function CarDamageDiagram({points,onChange,readOnly}) {
   );
 }
 
-// ─── GJENERIMI I PDF-SË SË KONTRATËS (print HTML, si te ArkPage) ──────────
+const DAMAGE_LB_EN = {scratch:"− Scratch",dent:"○ Dent",broken:"✕ Broken",missing:"▣ Missing"};
+
+// ─── UPLOAD FOTO PER KONTRATE (dëmtime/gjendje makine) ────────────────────
+async function sbUploadContractPhoto(file, resId, stage, token) {
+  const ext = (file.name.split(".").pop()||"jpg").toLowerCase();
+  const path = "contracts/"+resId+"_"+stage+"_"+Date.now()+"_"+Math.random().toString(36).slice(2,7)+"."+ext;
+  const r = await fetch(SB_URL + "/storage/v1/object/car-photos/" + encodeURIComponent(path), {
+    method: "POST", headers: { "apikey": SB_KEY, "Authorization": "Bearer " + token, "Content-Type": file.type||"image/jpeg" },
+    body: file
+  });
+  if (!r.ok) {
+    const errText = await r.text().catch(()=>"");
+    throw new Error("Upload dështoi: " + (errText || r.status));
+  }
+  return STORAGE_URL + encodeURIComponent(path);
+}
+
+// ─── NGARKUES FOTOSH (multi, me miniatura + fshirje) ──────────────────────
+function PhotoUploader({photos,onChange,uploadFn,label}) {
+  const [uploading,setUploading]=useState(false);
+  const fileRef=useRef(null);
+  async function handleFiles(files){
+    if(!files||!files.length) return;
+    setUploading(true);
+    try {
+      const urls=[];
+      for(const file of Array.from(files)){
+        const url=await uploadFn(file);
+        urls.push(url);
+      }
+      onChange([...(photos||[]),...urls]);
+    } catch(e){ alert("Ngarkimi i fotos dështoi: "+e.message); }
+    setUploading(false);
+    if(fileRef.current) fileRef.current.value="";
+  }
+  function removePhoto(i){ onChange((photos||[]).filter((_,idx)=>idx!==i)); }
+  return (
+    <div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:6}}>
+        {(photos||[]).map((url,i)=>(
+          <div key={i} style={{position:"relative",width:76,height:76,borderRadius:8,overflow:"hidden",border:"1px solid #e2e8f0",flexShrink:0}}>
+            <img src={url} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+            <button type="button" onClick={()=>removePhoto(i)} style={{position:"absolute",top:2,right:2,background:"rgba(0,0,0,0.65)",color:"#fff",border:"none",borderRadius:"50%",width:18,height:18,fontSize:10,cursor:"pointer",lineHeight:1,padding:0}}>✕</button>
+          </div>
+        ))}
+        <label style={{width:76,height:76,borderRadius:8,border:"2px dashed #cbd5e1",display:"flex",alignItems:"center",justifyContent:"center",cursor:uploading?"wait":"pointer",fontSize:20,color:"#94a3b8",flexShrink:0,background:"#fafafa"}}>
+          {uploading?"⏳":"➕"}
+          <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple onChange={e=>handleFiles(e.target.files)} style={{display:"none"}} disabled={uploading}/>
+        </label>
+      </div>
+      <div style={{fontSize:10,color:"#94a3b8"}}>{label||"Ngarko foto të gjendjes/dëmtimeve të makinës (mund të zgjedhësh disa njëherësh)"}</div>
+    </div>
+  );
+}
+
+// ─── GJENERIMI I PDF-SË SË KONTRATËS — dygjuhëshe (Shqip / English) ───────
 function buildContractHTML(c, cars, stage) {
   const carObj = cars.find(x=>x.name===c.car_name);
   const carLbl = carObj?.targa || c.car_name;
+  const brand = JSON.parse(localStorage.getItem("crm_brand")||"{}");
+  const companyName = brand.appName || "Car Rental Manager";
+  const contractNo = (c.id||c.reservation_id||"").toString().replace(/-/g,"").slice(0,8).toUpperCase();
+
   function dmgList(pts){
-    if(!pts||!pts.length) return "Nuk ka dëmtime të shënuara";
-    return pts.map(p=>DAMAGE_LB[p.type]).join(", ");
+    if(!pts||!pts.length) return "Nuk ka dëmtime të shënuara / No damage recorded";
+    return pts.map(p=>DAMAGE_LB[p.type]+" / "+DAMAGE_LB_EN[p.type]).join(", ");
   }
-  const showDropoff = stage==="dropoff" || c.status==="completed";
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Kontratë Qeraje ${c.reservation_id||""}</title>
+  function photosGrid(urls){
+    if(!urls||!urls.length) return "";
+    return `<div class="photos">${urls.map(u=>`<img src="${u}"/>`).join("")}</div>`;
+  }
+  const showDropoff = stage==="dropoff" || c.status==="completed" || !!c.dropoff_signature;
+
+  const TERMS_AL = [
+    "Qiramarrësi konfirmon se ka marrë automjetin në gjendjen e përshkruar më sipër dhe pranon ta kthejë në të njëjtën gjendje, me përjashtim të konsumit normal.",
+    "Depozita e garancisë do të kthehet plotësisht nëse automjeti kthehet pa dëmtime të reja, brenda afatit të përcaktuar dhe me nivel karburanti të njëjtë me atë të marrjes.",
+    "Çdo dëmtim, gjobë apo shkelje e rregullave gjatë periudhës së qerasë është përgjegjësi e plotë e qiramarrësit.",
+    "Automjeti nuk lejohet të përdoret jashtë territorit të Republikës së Shqipërisë pa miratim paraprak me shkrim nga qiradhënësi.",
+    "Në rast aksidenti apo dëmtimi, qiramarrësi është i detyruar të njoftojë menjëherë qiradhënësin dhe autoritetet përkatëse.",
+    "Vonesa në kthimin e automjetit tarifohet shtesë sipas çmimit ditor, përveç rasteve të komunikuara dhe miratuara paraprakisht.",
+    "Qiradhënësi nuk mban përgjegjësi për sende personale të lëna në automjet.",
+    "Nënshkrimi i kësaj kontrate nënkupton pranimin e plotë të kushteve të mësipërme nga ana e qiramarrësit."
+  ];
+  const TERMS_EN = [
+    "The renter confirms receiving the vehicle in the condition described above and agrees to return it in the same condition, normal wear excepted.",
+    "The security deposit will be fully refunded if the vehicle is returned without new damage, within the agreed time, and with the same fuel level as at pickup.",
+    "Any damage, fine, or traffic violation during the rental period is the sole responsibility of the renter.",
+    "The vehicle may not be used outside the territory of the Republic of Albania without prior written approval from the lessor.",
+    "In case of accident or damage, the renter must immediately notify the lessor and the relevant authorities.",
+    "Late return of the vehicle is charged additionally at the daily rate, except when communicated and approved in advance.",
+    "The lessor is not responsible for personal belongings left in the vehicle.",
+    "Signing this contract implies full acceptance of the above terms by the renter."
+  ];
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Kontratë Qeraje ${contractNo}</title>
   <style>
-    body{font-family:Arial,sans-serif;margin:0;padding:24px;color:#0f172a;font-size:13px}
+    body{font-family:Arial,sans-serif;margin:0;padding:24px;color:#0f172a;font-size:12px}
     table{width:100%;border-collapse:collapse;margin-bottom:14px}
-    td,th{border:1px solid #cbd5e1;padding:6px 10px;font-size:12px;text-align:left}
-    th{background:#f1f5f9;width:32%}
+    td,th{border:1px solid #cbd5e1;padding:6px 10px;font-size:11.5px;text-align:left;vertical-align:top}
+    th{background:#f1f5f9;width:34%;font-weight:700}
     h2{margin:0 0 4px}
-    .hdr{background:#0f172a;color:#fff;padding:16px 20px;border-radius:8px;margin-bottom:16px}
-    .sig{margin-top:10px;text-align:center}
-    .sig img{max-width:220px;border:1px solid #e2e8f0;border-radius:6px}
+    h3{margin:18px 0 8px;font-size:13px;border-bottom:2px solid #1d4ed8;padding-bottom:4px}
+    .hdr{background:#0f172a;color:#fff;padding:16px 20px;border-radius:8px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
+    .hdr .no{font-size:11px;opacity:.8;text-align:right;white-space:nowrap}
+    .sig{margin-top:10px}
+    .sig img{max-width:220px;border:1px solid #e2e8f0;border-radius:6px;display:block}
+    .sig .ts{font-size:10px;color:#64748b;margin-top:3px}
+    .photos{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+    .photos img{width:92px;height:70px;object-fit:cover;border-radius:5px;border:1px solid #e2e8f0}
+    .terms{font-size:10.5px;color:#374151;line-height:1.7}
+    .terms ol{padding-left:16px;margin:4px 0}
+    .terms li{margin-bottom:6px}
+    .terms .en{color:#64748b;font-style:italic}
+    .sub{font-weight:400;color:#64748b}
     @media print{body{padding:8px}}
   </style></head><body>
+
   <div class="hdr">
-    <h2>📝 Kontratë Qeraje Automjeti</h2>
-    <div style="opacity:.8;font-size:12px">Gjeneruar: ${nowStr()}</div>
+    <div>
+      <h2>📝 Kontratë Qeraje Automjeti</h2>
+      <div style="opacity:.8;font-size:11px">Vehicle Rental Agreement</div>
+    </div>
+    <div class="no">
+      Nr. Kontrate / Contract No: <strong>${contractNo}</strong><br/>
+      Gjeneruar / Generated: ${nowStr()}<br/>
+      ${companyName}
+    </div>
   </div>
+
+  <h3>👤 Të Dhënat e Klientit <span class="sub">/ Renter Information</span></h3>
   <table>
-    <tr><th>Klienti</th><td>${c.client_name||""}</td></tr>
-    <tr><th>Telefoni</th><td>${c.client_phone||""}</td></tr>
-    <tr><th>Adresa</th><td>${c.client_address||""}</td></tr>
-    <tr><th>Nr. ID / Patentë</th><td>${c.license_number||c.client_id_card||""}</td></tr>
-    <tr><th>Makina</th><td>${carLbl} ${carObj?.model?("· "+carObj.model):""}</td></tr>
-    <tr><th>Çmimi Total</th><td>${c.total_price?fmtM(c.total_price,c.currency):""}</td></tr>
-    <tr><th>Depozitë Garancie</th><td>${c.deposit_amount?fmtM(c.deposit_amount,c.currency):""}</td></tr>
-    <tr><th>Karta e Garancisë</th><td>${c.card_holder||""} ${c.card_type||""} ****${c.card_last4||""}</td></tr>
+    <tr><th>Emri i Plotë / Full Name</th><td>${c.client_name||""}</td></tr>
+    <tr><th>Telefoni / Phone</th><td>${c.client_phone||""}</td></tr>
+    <tr><th>Adresa / Address</th><td>${c.client_address||""}</td></tr>
+    <tr><th>Datëlindja / Date of Birth</th><td>${c.client_dob?fmtFull(c.client_dob):""}</td></tr>
+    <tr><th>Nr. Patentë/ID / License-ID No.</th><td>${c.license_number||c.client_id_card||""}</td></tr>
+    <tr><th>Vendi i Lëshimit / Place of Issue</th><td>${c.license_issue||""}</td></tr>
+    <tr><th>Skadimi i Patentës / License Expiry</th><td>${c.license_expiry?fmtFull(c.license_expiry):""}</td></tr>
   </table>
 
-  <h3>🚗 Marrja e Makinës (Pickup)</h3>
+  <h3>🚗 Automjeti & Çmimi <span class="sub">/ Vehicle &amp; Pricing</span></h3>
   <table>
-    <tr><th>Vendndodhja</th><td>${c.pickup_location||""}</td></tr>
-    <tr><th>Data/Ora</th><td>${c.pickup_datetime?fmtDT(c.pickup_datetime):""}</td></tr>
-    <tr><th>Karburanti</th><td>${c.pickup_fuel||""}</td></tr>
-    <tr><th>Km</th><td>${c.pickup_km||""}</td></tr>
-    <tr><th>Dëmtime (OUT)</th><td>${dmgList(c.pickup_damage)}</td></tr>
+    <tr><th>Makina / Vehicle</th><td>${carLbl} ${carObj?.model?("· "+carObj.model):""}</td></tr>
+    <tr><th>Çmimi Total / Total Price</th><td>${c.total_price?fmtM(c.total_price,c.currency):""}</td></tr>
+    <tr><th>Depozitë Garancie / Security Deposit</th><td>${c.deposit_amount?fmtM(c.deposit_amount,c.currency):""}</td></tr>
+    <tr><th>Karta e Garancisë / Guarantee Card</th><td>${c.card_holder||""} ${c.card_type||""} ${c.card_last4?("****"+c.card_last4):""}</td></tr>
   </table>
-  ${c.pickup_signature?`<div class="sig"><div style="font-size:11px;color:#64748b">Nënshkrimi i klientit (marrje)</div><img src="${c.pickup_signature}"/></div>`:""}
+
+  <h3>🚗 Marrja e Makinës <span class="sub">/ Pickup</span></h3>
+  <table>
+    <tr><th>Vendndodhja / Location</th><td>${c.pickup_location||""}</td></tr>
+    <tr><th>Data/Ora / Date-Time</th><td>${c.pickup_datetime?fmtDT(c.pickup_datetime):""}</td></tr>
+    <tr><th>Karburanti / Fuel Level</th><td>${c.pickup_fuel||""}</td></tr>
+    <tr><th>Km</th><td>${c.pickup_km||""}</td></tr>
+    <tr><th>Dëmtime / Damage (OUT)</th><td>${dmgList(c.pickup_damage)}</td></tr>
+  </table>
+  ${photosGrid(c.pickup_photos)}
+  ${c.pickup_signature?`<div class="sig"><div style="font-size:10px;color:#94a3b8;text-transform:uppercase">Nënshkrimi i klientit / Renter's Signature (Pickup)</div><img src="${c.pickup_signature}"/><div class="ts">${c.pickup_signed_at?fmtDT(c.pickup_signed_at):""}</div></div>`:""}
 
   ${showDropoff?`
-  <h3 style="margin-top:20px">🏁 Kthimi i Makinës (Drop-off)</h3>
+  <h3>🏁 Kthimi i Makinës <span class="sub">/ Drop-off</span></h3>
   <table>
-    <tr><th>Vendndodhja</th><td>${c.dropoff_location||""}</td></tr>
-    <tr><th>Data/Ora</th><td>${c.dropoff_datetime?fmtDT(c.dropoff_datetime):""}</td></tr>
-    <tr><th>Karburanti</th><td>${c.dropoff_fuel||""}</td></tr>
+    <tr><th>Vendndodhja / Location</th><td>${c.dropoff_location||""}</td></tr>
+    <tr><th>Data/Ora / Date-Time</th><td>${c.dropoff_datetime?fmtDT(c.dropoff_datetime):""}</td></tr>
+    <tr><th>Karburanti / Fuel Level</th><td>${c.dropoff_fuel||""}</td></tr>
     <tr><th>Km</th><td>${c.dropoff_km||""}</td></tr>
-    <tr><th>Dëmtime (IN)</th><td>${dmgList(c.dropoff_damage)}</td></tr>
+    <tr><th>Dëmtime / Damage (IN)</th><td>${dmgList(c.dropoff_damage)}</td></tr>
   </table>
-  ${c.dropoff_signature?`<div class="sig"><div style="font-size:11px;color:#64748b">Nënshkrimi i klientit (kthim)</div><img src="${c.dropoff_signature}"/></div>`:""}
+  ${photosGrid(c.dropoff_photos)}
+  ${c.dropoff_signature?`<div class="sig"><div style="font-size:10px;color:#94a3b8;text-transform:uppercase">Nënshkrimi i klientit / Renter's Signature (Drop-off)</div><img src="${c.dropoff_signature}"/><div class="ts">${c.dropoff_signed_at?fmtDT(c.dropoff_signed_at):""}</div></div>`:""}
   `:""}
 
-  <p style="margin-top:22px;font-size:11px;color:#64748b">Nënshkruesi deklaron se ka lexuar dhe pranon kushtet e përgjithshme të qerasë të kompanisë.</p>
+  <h3>📋 Kushtet e Përgjithshme <span class="sub">/ General Terms &amp; Conditions</span></h3>
+  <div class="terms">
+    <ol>
+      ${TERMS_AL.map((t,i)=>`<li>${t}<br/><span class="en">${TERMS_EN[i]}</span></li>`).join("")}
+    </ol>
+  </div>
+
+  <p style="margin-top:16px;font-size:10.5px;color:#64748b">
+    Nënshkruesi deklaron se ka lexuar dhe pranon kushtet e përgjithshme të qerasë të kompanisë.<br/>
+    <span style="font-style:italic">The undersigned declares to have read and accepts the company's general rental terms.</span>
+  </p>
   </body></html>`;
 }
 function printContract(c, cars, stage) {
@@ -436,23 +560,23 @@ function printContract(c, cars, stage) {
   if (w) { w.document.write(html); w.document.close(); setTimeout(()=>w.print(), 500); }
 }
 
-// ─── MODALI I KONTRATËS (pickup + dropoff) ────────────────────────────────
-function ContractModal({r, sess, cars, addLog, onClose}) {
+// ─── FAQJA E PLOTË E KONTRATËS (jo modal — faqe më vete) ──────────────────
+function ContractEditor({r, sess, cars, addLog, onBack}) {
   const mob = useMobile();
   const [loading,setLoading] = useState(true);
   const [saving,setSaving] = useState(false);
-  const [existing,setExisting] = useState(null); // rekordi ekzistues nese ka
-  const [stage,setStage] = useState("pickup"); // "pickup" | "dropoff"
+  const [existing,setExisting] = useState(null);
+  const [stage,setStage] = useState("pickup");
 
   const [f,setF] = useState({
     client_name:r.client_name||"", client_phone:r.client_phone||"", client_id_card:r.client_id_card||"",
-    client_address:"", license_number:"", license_issue:"", license_expiry:"",
+    client_address:"", client_dob:"", license_number:"", license_issue:"", license_expiry:"",
     total_price:r.total_price||"", currency:r.currency||"ALL", deposit_amount:"",
     card_holder:"", card_last4:"", card_type:"", card_expiry:"",
     pickup_location:"", pickup_datetime:new Date().toISOString().slice(0,16),
-    pickup_fuel:"8/8 (100%)", pickup_km:r.km_out||"", pickup_damage:[], pickup_signature:"",
+    pickup_fuel:"8/8 (100%)", pickup_km:r.km_out||"", pickup_damage:[], pickup_signature:"", pickup_photos:[],
     dropoff_location:"", dropoff_datetime:new Date().toISOString().slice(0,16),
-    dropoff_fuel:"8/8 (100%)", dropoff_km:r.km_in||"", dropoff_damage:[], dropoff_signature:"",
+    dropoff_fuel:"8/8 (100%)", dropoff_km:r.km_in||"", dropoff_damage:[], dropoff_signature:"", dropoff_photos:[],
   });
 
   useEffect(()=>{
@@ -461,7 +585,7 @@ function ContractModal({r, sess, cars, addLog, onClose}) {
         if(rows&&rows[0]){
           const c=rows[0];
           setExisting(c);
-          setF(prev=>({...prev,...c}));
+          setF(prev=>({...prev,...c,pickup_photos:c.pickup_photos||[],dropoff_photos:c.dropoff_photos||[]}));
           setStage(c.status==="pickup_done"?"dropoff":"pickup");
         }
         setLoading(false);
@@ -469,8 +593,6 @@ function ContractModal({r, sess, cars, addLog, onClose}) {
   },[]);
 
   function upd(k,v){ setF(x=>({...x,[k]:v})); }
-
-  // Kolonat numerike ne Supabase (numeric) nuk pranojne "" — duhet null
   function sanitizeNum(body){
     const numFields=["total_price","deposit_amount","pickup_km","dropoff_km"];
     const out={...body};
@@ -480,18 +602,15 @@ function ContractModal({r, sess, cars, addLog, onClose}) {
     });
     return out;
   }
+  async function uploadPickupPhoto(file){ return sbUploadContractPhoto(file,r.id,"pickup",sess.token); }
+  async function uploadDropoffPhoto(file){ return sbUploadContractPhoto(file,r.id,"dropoff",sess.token); }
 
   async function saveDraft(){
     setSaving(true);
     try {
       const body = sanitizeNum({...f, reservation_id:r.id, car_name:r.car_name, created_by:sess.profile?.username, status:existing?.status||"draft"});
-      if(existing){
-        const [u]=await sbAuthPatch("rental_contracts",existing.id,body,sess.token);
-        setExisting(u);
-      } else {
-        const [u]=await sbAuthPost("rental_contracts",body,sess.token);
-        setExisting(u);
-      }
+      if(existing){ const [u]=await sbAuthPatch("rental_contracts",existing.id,body,sess.token); setExisting(u); }
+      else { const [u]=await sbAuthPost("rental_contracts",body,sess.token); setExisting(u); }
     } catch(e){ alert(e.message); }
     setSaving(false);
   }
@@ -523,40 +642,55 @@ function ContractModal({r, sess, cars, addLog, onClose}) {
       setExisting(saved);
       addLog&&addLog("Kontratë Dropoff",r.car_name+" - "+r.client_name);
       printContract(saved,cars,"dropoff");
-      onClose();
     } catch(e){ alert(e.message); }
     setSaving(false);
   }
 
-  if(loading) return <Modal title="Kontratë Qeraje" onClose={onClose}><Spin/></Modal>;
+  if(loading) return <div style={{padding:40}}><Spin/></div>;
 
   return (
-    <Modal title={"📝 Kontratë Qeraje — "+carLabel(r.car_name,cars)} onClose={onClose} wide>
-      {/* Tabet Pickup / Dropoff */}
-      <div style={{display:"flex",gap:0,borderBottom:"2px solid #e2e8f0",marginBottom:14}}>
-        <button onClick={()=>setStage("pickup")} style={{flex:1,padding:"9px 0",border:"none",background:"none",cursor:"pointer",fontWeight:stage==="pickup"?700:500,fontSize:13,color:stage==="pickup"?"#1d4ed8":"#64748b",borderBottom:stage==="pickup"?"2px solid #1d4ed8":"2px solid transparent",marginBottom:-2}}>🚗 Marrje (Pickup)</button>
-        <button onClick={()=>existing&&setStage("dropoff")} disabled={!existing} style={{flex:1,padding:"9px 0",border:"none",background:"none",cursor:existing?"pointer":"not-allowed",fontWeight:stage==="dropoff"?700:500,fontSize:13,color:stage==="dropoff"?"#1d4ed8":existing?"#64748b":"#cbd5e1",borderBottom:stage==="dropoff"?"2px solid #1d4ed8":"2px solid transparent",marginBottom:-2}}>🏁 Kthim (Dropoff)</button>
+    <div style={{padding:mob?10:14,maxWidth:820,margin:"0 auto"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+        <button onClick={onBack} style={{...CB,padding:"7px 12px"}}>← Mbrapa te Kontratat</button>
+        <h2 style={{margin:0,fontSize:16,fontWeight:800,color:"#0f172a",flex:1}}>📝 Kontratë — {carLabel(r.car_name,cars)}</h2>
+      </div>
+
+      <div style={{display:"flex",gap:0,borderBottom:"2px solid #e2e8f0",marginBottom:14,background:"#fff",borderRadius:"10px 10px 0 0",overflow:"hidden",border:"1px solid #e2e8f0",borderBottomWidth:2}}>
+        <button onClick={()=>setStage("pickup")} style={{flex:1,padding:"11px 0",border:"none",background:"none",cursor:"pointer",fontWeight:stage==="pickup"?700:500,fontSize:13,color:stage==="pickup"?"#1d4ed8":"#64748b",borderBottom:stage==="pickup"?"2px solid #1d4ed8":"2px solid transparent",marginBottom:-2}}>🚗 Marrje (Pickup)</button>
+        <button onClick={()=>existing&&setStage("dropoff")} disabled={!existing} style={{flex:1,padding:"11px 0",border:"none",background:"none",cursor:existing?"pointer":"not-allowed",fontWeight:stage==="dropoff"?700:500,fontSize:13,color:stage==="dropoff"?"#1d4ed8":existing?"#64748b":"#cbd5e1",borderBottom:stage==="dropoff"?"2px solid #1d4ed8":"2px solid transparent",marginBottom:-2}}>🏁 Kthim (Dropoff)</button>
       </div>
 
       {existing?.status==="completed"&&(
         <div style={{background:"#dcfce7",border:"1px solid #bbf7d0",borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:12,color:"#166534",fontWeight:700}}>✅ Kontrata është përfunduar (pickup + dropoff) dhe u nënshkrua.</div>
       )}
 
-      {/* ── TË DHËNAT E KLIENTIT — të përbashkëta ── */}
-      <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:10,marginBottom:14}}>
-        <Fld label="Emri i Klientit *"><input value={f.client_name} onChange={e=>upd("client_name",e.target.value)} style={FL}/></Fld>
-        <Fld label="Telefoni"><input value={f.client_phone} onChange={e=>upd("client_phone",e.target.value)} style={FL}/></Fld>
-        <Fld label="Adresa" col2><input value={f.client_address} onChange={e=>upd("client_address",e.target.value)} style={FL}/></Fld>
-        <Fld label="Nr. Patentë / ID"><input value={f.license_number} onChange={e=>upd("license_number",e.target.value)} style={FL}/></Fld>
-        <Fld label="Skadimi i Patentës"><DateInput value={f.license_expiry} onChange={v=>upd("license_expiry",v)}/></Fld>
-        <Fld label="Çmimi Total"><input type="number" value={f.total_price} onChange={e=>upd("total_price",e.target.value)} style={FL}/></Fld>
-        <Fld label="Depozitë Garancie"><input type="number" value={f.deposit_amount} onChange={e=>upd("deposit_amount",e.target.value)} style={FL}/></Fld>
-        <Fld label="Mbajtësi i Kartës"><input value={f.card_holder} onChange={e=>upd("card_holder",e.target.value)} style={FL} placeholder="Emri Mbiemri"/></Fld>
-        <Fld label="4 Shifrat e Fundit të Kartës"><input value={f.card_last4} onChange={e=>upd("card_last4",e.target.value.replace(/\D/g,"").slice(0,4))} style={FL} maxLength={4} placeholder="7189"/></Fld>
+      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:16,marginBottom:14}}>
+        <h4 style={{margin:"0 0 10px",fontSize:13,color:"#0f172a"}}>👤 Të Dhënat e Klientit</h4>
+        <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:10}}>
+          <Fld label="Emri i Klientit *"><input value={f.client_name} onChange={e=>upd("client_name",e.target.value)} style={FL}/></Fld>
+          <Fld label="Telefoni"><input value={f.client_phone} onChange={e=>upd("client_phone",e.target.value)} style={FL}/></Fld>
+          <Fld label="Adresa" col2><input value={f.client_address} onChange={e=>upd("client_address",e.target.value)} style={FL}/></Fld>
+          <Fld label="Datëlindja"><DateInput value={f.client_dob} onChange={v=>upd("client_dob",v)}/></Fld>
+          <Fld label="Nr. Patentë / ID"><input value={f.license_number} onChange={e=>upd("license_number",e.target.value)} style={FL}/></Fld>
+          <Fld label="Vendi i Lëshimit"><input value={f.license_issue} onChange={e=>upd("license_issue",e.target.value)} style={FL}/></Fld>
+          <Fld label="Skadimi i Patentës"><DateInput value={f.license_expiry} onChange={v=>upd("license_expiry",v)}/></Fld>
+        </div>
+      </div>
+
+      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:16,marginBottom:14}}>
+        <h4 style={{margin:"0 0 10px",fontSize:13,color:"#0f172a"}}>💶 Çmimi & Garancia</h4>
+        <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:10}}>
+          <Fld label="Çmimi Total"><input type="number" value={f.total_price} onChange={e=>upd("total_price",e.target.value)} style={FL}/></Fld>
+          <Fld label="Monedha"><select value={f.currency} onChange={e=>upd("currency",e.target.value)} style={FL}><option value="ALL">Lekë</option><option value="EUR">Euro</option></select></Fld>
+          <Fld label="Depozitë Garancie"><input type="number" value={f.deposit_amount} onChange={e=>upd("deposit_amount",e.target.value)} style={FL}/></Fld>
+          <Fld label="Mbajtësi i Kartës"><input value={f.card_holder} onChange={e=>upd("card_holder",e.target.value)} style={FL} placeholder="Emri Mbiemri"/></Fld>
+          <Fld label="Lloji i Kartës"><input value={f.card_type} onChange={e=>upd("card_type",e.target.value)} style={FL} placeholder="Visa / Mastercard"/></Fld>
+          <Fld label="4 Shifrat e Fundit të Kartës"><input value={f.card_last4} onChange={e=>upd("card_last4",e.target.value.replace(/\D/g,"").slice(0,4))} style={FL} maxLength={4} placeholder="7189"/></Fld>
+        </div>
       </div>
 
       {stage==="pickup" ? (
-        <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,padding:14}}>
+        <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:16}}>
           <h4 style={{margin:"0 0 10px",fontSize:13,color:"#0f172a"}}>🚗 Detajet e Marrjes</h4>
           <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:10,marginBottom:12}}>
             <Fld label="Vendndodhja *"><input value={f.pickup_location} onChange={e=>upd("pickup_location",e.target.value)} style={FL} placeholder="p.sh. Aeroporti Tiranë"/></Fld>
@@ -565,11 +699,13 @@ function ContractModal({r, sess, cars, addLog, onClose}) {
           </div>
           <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:6}}>Diagrami i Dëmtimeve (OUT)</label>
           <CarDamageDiagram points={f.pickup_damage} onChange={v=>upd("pickup_damage",v)}/>
+          <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",margin:"14px 0 6px"}}>📷 Foto të Gjendjes / Dëmtimeve</label>
+          <PhotoUploader photos={f.pickup_photos} onChange={v=>upd("pickup_photos",v)} uploadFn={uploadPickupPhoto}/>
           <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",margin:"14px 0 6px"}}>Nënshkrimi i Klientit *</label>
           <SignaturePad value={f.pickup_signature} onChange={v=>upd("pickup_signature",v)}/>
         </div>
       ) : (
-        <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,padding:14}}>
+        <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:16}}>
           <h4 style={{margin:"0 0 10px",fontSize:13,color:"#0f172a"}}>🏁 Detajet e Kthimit</h4>
           <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:10,marginBottom:12}}>
             <Fld label="Vendndodhja *"><input value={f.dropoff_location} onChange={e=>upd("dropoff_location",e.target.value)} style={FL} placeholder="p.sh. Aeroporti Tiranë"/></Fld>
@@ -578,13 +714,14 @@ function ContractModal({r, sess, cars, addLog, onClose}) {
           </div>
           <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:6}}>Diagrami i Dëmtimeve (IN)</label>
           <CarDamageDiagram points={f.dropoff_damage} onChange={v=>upd("dropoff_damage",v)}/>
+          <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",margin:"14px 0 6px"}}>📷 Foto të Gjendjes / Dëmtimeve</label>
+          <PhotoUploader photos={f.dropoff_photos} onChange={v=>upd("dropoff_photos",v)} uploadFn={uploadDropoffPhoto}/>
           <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",margin:"14px 0 6px"}}>Nënshkrimi i Klientit *</label>
           <SignaturePad value={f.dropoff_signature} onChange={v=>upd("dropoff_signature",v)}/>
         </div>
       )}
 
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16,flexWrap:"wrap"}}>
-        <button onClick={onClose} style={CB}>Mbyll</button>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16,marginBottom:30,flexWrap:"wrap"}}>
         <button onClick={saveDraft} disabled={saving} style={{...CB,fontWeight:700}}>{saving?"...":"💾 Ruaj Draft"}</button>
         {existing&&<button onClick={()=>printContract(existing,cars,stage)} style={{...PB,background:"#475569"}}>🖨️ Shiko PDF</button>}
         {stage==="pickup"
@@ -592,7 +729,71 @@ function ContractModal({r, sess, cars, addLog, onClose}) {
           : <button onClick={confirmDropoff} disabled={saving} style={{...PB,background:"#059669"}}>{saving?"⏳...":"✅ Konfirmo Kthimin + PDF"}</button>
         }
       </div>
-    </Modal>
+    </div>
+  );
+}
+
+// ─── FAQJA "KONTRATAT" — listë + hap kontratën e plotë ────────────────────
+function KontratatPage({sess,reload,reloadTick,addLog}) {
+  const mob=useMobile();
+  const [cars,setCars]=useState([]);
+  const [reses,setReses]=useState([]);
+  const [contracts,setContracts]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [srch,setSrch]=useState("");
+  const [selResId,setSelResId]=useState(null);
+
+  useEffect(()=>{
+    setLoading(true);
+    Promise.all([
+      sbAuthGet("cars","order=sort_order.asc",sess.token),
+      sbAuthGet("reservations","status=neq.Anuluar",sess.token),
+      sbAuthGet("rental_contracts","",sess.token)
+    ]).then(([c,r,ct])=>{setCars(c);setReses(r);setContracts(ct);setLoading(false);}).catch(()=>setLoading(false));
+  },[reloadTick,sess.token]);
+
+  useEffect(()=>{
+    const pending=localStorage.getItem("crm_open_contract_res_id");
+    if(pending){ localStorage.removeItem("crm_open_contract_res_id"); setSelResId(pending); }
+  },[]);
+
+  if(loading) return <Spin/>;
+
+  const selRes = selResId ? reses.find(r=>r.id===selResId) : null;
+  if(selRes){
+    return <ContractEditor r={selRes} sess={sess} cars={cars} addLog={addLog} onBack={()=>{setSelResId(null); reload&&reload();}}/>;
+  }
+
+  function contractFor(resId){ return contracts.find(c=>c.reservation_id===resId); }
+  const list = reses.filter(r=>!srch||[r.client_name,r.car_name].some(s=>(s||"").toLowerCase().includes(srch.toLowerCase())))
+    .sort((a,b)=>(b.date_from||"").localeCompare(a.date_from||""));
+
+  return (
+    <div style={{padding:mob?10:14,maxWidth:900,margin:"0 auto"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+        <h2 style={{margin:0,fontSize:17,fontWeight:700,color:"#0f172a",flex:1}}>📄 Kontratat e Qerasë</h2>
+        <input value={srch} onChange={e=>setSrch(e.target.value)} placeholder="Kërko klientin/makinën..." style={{padding:"7px 11px",borderRadius:8,border:"1px solid #e2e8f0",fontSize:13,width:220,fontFamily:"inherit"}}/>
+      </div>
+      {list.length===0
+        ? <div style={{background:"#fff",borderRadius:12,border:"1px solid #e2e8f0",padding:40,textAlign:"center",color:"#94a3b8"}}>Asnjë rezervim.</div>
+        : list.map(r=>{
+          const ct=contractFor(r.id);
+          const st = !ct?{lb:"— Pa kontratë",bg:"#f1f5f9",tx:"#64748b"}
+            : ct.status==="completed"?{lb:"✅ Përfunduar",bg:"#dcfce7",tx:"#166534"}
+            : ct.status==="pickup_done"?{lb:"🚗 Vetëm Pickup",bg:"#dbeafe",tx:"#1e40af"}
+            : {lb:"📝 Draft",bg:"#fef3c7",tx:"#92400e"};
+          return (
+            <div key={r.id} onClick={()=>setSelResId(r.id)} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:"12px 14px",marginBottom:8,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:700,fontSize:13,color:"#0f172a"}}>{carLabel(r.car_name,cars)} · {r.client_name}</div>
+                <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{fmtFull(r.date_from)} → {fmtFull(r.date_to)}</div>
+              </div>
+              <span style={{padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:700,background:st.bg,color:st.tx,whiteSpace:"nowrap"}}>{st.lb}</span>
+            </div>
+          );
+        })
+      }
+    </div>
   );
 }
 
@@ -760,7 +961,7 @@ export default function App() {
 
   const role = sess.profile?.role || "staff";
   const NAV = [
-    ...(role!=="finance"?[{id:"cal",lb:"📅 Kalendar",icon:"📅"},{id:"res",lb:"📋 Rezervime",icon:"📋"}]:[]),
+    ...(role!=="finance"?[{id:"cal",lb:"📅 Kalendar",icon:"📅"},{id:"res",lb:"📋 Rezervime",icon:"📋"},{id:"kon",lb:"📄 Kontratat",icon:"📄"}]:[]),
     ...(role==="admin"||role==="finance"?[{id:"fin",lb:"📊 Financa",icon:"📊"},{id:"ark",lb:"🏦 Arkë",icon:"🏦"}]:[]),
     ...(role!=="finance"?[{id:"rpt",lb:"📈 Raport",icon:"📈"},{id:"srv",lb:"🔧 Servis",icon:"🔧"}]:[]),
     ...(role==="admin"?[{id:"cli",lb:"👥 Klientët",icon:"👥"},{id:"aud",lb:"🔍 Aktiviteti",icon:"🔍"},{id:"set",lb:"⚙️ Cilësime",icon:"⚙️"}]:[]),
@@ -830,8 +1031,9 @@ export default function App() {
 
       {/* MAIN CONTENT */}
       <div style={{flex:1,overflow:"auto"}}>
-        {curPage==="cal" && <CalPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
-        {curPage==="res" && <ResPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
+        {curPage==="cal" && <CalPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog} onOpenContract={()=>setPage("kon")}/>}
+        {curPage==="res" && <ResPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog} onOpenContract={()=>setPage("kon")}/>}
+        {curPage==="kon" && <KontratatPage sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
         {curPage==="fin" && <FinPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
         {curPage==="rpt" && <RptPage  sess={sess} reloadTick={reloadTick}/>}
         {curPage==="srv" && <SrvPage  sess={sess} reload={reload} reloadTick={reloadTick} addLog={addAuditLog}/>}
@@ -919,7 +1121,7 @@ function LoginScreen({lf,setLf,login}) {
 }
 
 // ─── CALENDAR ────────────────────────────────────────────────────────────────
-function CalPage({sess,reload,reloadTick,addLog}) {
+function CalPage({sess,reload,reloadTick,addLog,onOpenContract}) {
   const mob=useMobile();
   const [start,setStart]=useState(todayY());
   const [ndays,setNdays]=useState(30);
@@ -1097,13 +1299,13 @@ function CalPage({sess,reload,reloadTick,addLog}) {
         ))}
       </div>
 
-      {det&&<DetModal r={det} sess={sess} addLog={addLog} reload={reload} onClose={()=>setDet(null)} onUpd={u=>setDet(u)} cars={cars} reses={reses}/>}
+      {det&&<DetModal r={det} sess={sess} addLog={addLog} reload={reload} onClose={()=>setDet(null)} onUpd={u=>setDet(u)} cars={cars} reses={reses} onOpenContract={onOpenContract}/>}
     </div>
   );
 }
 
 // ─── DETAIL MODAL ─────────────────────────────────────────────────────────────
-function DetModal({r,sess,addLog,reload,onClose,onUpd,cars,reses}) {
+function DetModal({r,sess,addLog,reload,onClose,onUpd,cars,reses,onOpenContract}) {
   const [carSetting,setCarSetting]=useState(null);
   const [cur,setCur]=useState(r);
   const [cn,setCn]=useState(r.cond_note||"");
@@ -1112,7 +1314,6 @@ function DetModal({r,sess,addLog,reload,onClose,onUpd,cars,reses}) {
   const [kmIn,setKmIn]=useState(r.km_in||"");
   const [saving,setSaving]=useState(false);
   const [saved,setSaved]=useState(false);
-  const [showContract,setShowContract]=useState(false);
 
   const [payMethod,setPayMethod]=useState("cash");
   const [depAmt,setDepAmt]=useState("");
@@ -1292,8 +1493,11 @@ function DetModal({r,sess,addLog,reload,onClose,onUpd,cars,reses}) {
       </div>
 
       {/* ── KONTRATË QERAJE — buton i ri ── */}
-      <button onClick={()=>setShowContract(true)} style={{...PB,background:"#0f766e",width:"100%",marginBottom:14,fontSize:13,padding:"9px 0"}}>📝 Kontratë Qeraje (Pickup / Dropoff)</button>
-      {showContract&&<ContractModal r={cur} sess={sess} cars={cars} addLog={addLog} onClose={()=>setShowContract(false)}/>}
+      <button onClick={()=>{
+        localStorage.setItem("crm_open_contract_res_id",cur.id);
+        onOpenContract&&onOpenContract();
+        onClose();
+      }} style={{...PB,background:"#0f766e",width:"100%",marginBottom:14,fontSize:13,padding:"9px 0"}}>📝 Shko te Kontrata (Pickup / Dropoff)</button>
 
       {/* Parapagim */}
       {!done&&!paid&&(
@@ -1439,7 +1643,7 @@ function DetModal({r,sess,addLog,reload,onClose,onUpd,cars,reses}) {
 }
 
 // ─── RESERVATIONS ─────────────────────────────────────────────────────────────
-function ResPage({sess,reload,reloadTick,addLog}) {
+function ResPage({sess,reload,reloadTick,addLog,onOpenContract}) {
   const mob=useMobile();
   const [reses,setReses]=useState([]);
   const [cars,setCars]=useState([]);
@@ -1693,7 +1897,7 @@ function ResPage({sess,reload,reloadTick,addLog}) {
           <button onClick={doSave} disabled={liveConflicts.length>0||isPassiveCar} style={{...PB,opacity:(liveConflicts.length>0||isPassiveCar)?0.5:1,cursor:(liveConflicts.length>0||isPassiveCar)?"not-allowed":"pointer"}}>💾 Ruaj</button>
         </div>
       </Modal>}
-      {detR&&<DetModal r={detR} sess={sess} addLog={addLog} reload={reload} onClose={()=>setDetId(null)} onUpd={u=>{setDetId(u.id);setReses(rs=>rs.map(x=>x.id===u.id?u:x));}} cars={cars} reses={reses}/>}
+      {detR&&<DetModal r={detR} sess={sess} addLog={addLog} reload={reload} onClose={()=>setDetId(null)} onUpd={u=>{setDetId(u.id);setReses(rs=>rs.map(x=>x.id===u.id?u:x));}} cars={cars} reses={reses} onOpenContract={onOpenContract}/>}
     </div>
   );
 }
