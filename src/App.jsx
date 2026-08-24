@@ -431,18 +431,21 @@ function buildContractHTML(c, cars, stage) {
   const brand = JSON.parse(localStorage.getItem("crm_brand")||"{}");
   const companyName = brand.appName || "Car Rental Manager";
   const contractNo = (c.id||c.reservation_id||"").toString().replace(/-/g,"").slice(0,8).toUpperCase();
+  const contactLine = [brand.companyAddress, brand.companyPhone?("Tel: "+brand.companyPhone):"", brand.companyEmail].filter(Boolean).join("  ·  ");
+  const legalLine = [brand.companyNipt?("NIPT: "+brand.companyNipt):"", brand.companyWebsite].filter(Boolean).join("  ·  ");
 
   function dmgList(pts){
-    if(!pts||!pts.length) return "Nuk ka dëmtime të shënuara / No damage recorded";
+    if(!pts||!pts.length) return "";
     return pts.map(p=>DAMAGE_LB[p.type]+" / "+DAMAGE_LB_EN[p.type]).join(", ");
   }
   function photosGrid(urls){
     if(!urls||!urls.length) return "";
     return `<div class="photos">${urls.map(u=>`<img src="${u}"/>`).join("")}</div>`;
   }
-  function row(lbl,val){ return val?`<tr><th>${lbl}</th><td>${val}</td></tr>`:`<tr><th>${lbl}</th><td>—</td></tr>`; }
+  // Rreshta boshe hiqen krejtësisht — nuk shfaqim fusha bosh (format më i pastër, si kontratat evropiane)
+  function row(lbl,val){ return (val===undefined||val===null||val==="")?"":`<tr><th>${lbl}</th><td>${val}</td></tr>`; }
   const showDropoff = stage==="dropoff" || c.status==="completed" || !!c.dropoff_signature;
-  const toBePaid = (c.total_price!=null && c.total_paid!=null) ? (Number(c.total_price)-Number(c.total_paid)) : null;
+  const toBePaid = (c.total_price!=null && c.total_paid!=null && c.total_paid!=="") ? (Number(c.total_price)-Number(c.total_paid)) : null;
 
   const TERMS = [
     ["A) Sigurimi dhe Pajisjet","Automjeti mbulohet nga sigurimi i detyrueshëm ndaj palëve të treta sipas legjislacionit shqiptar. Automjeti dorëzohet me kilometrazhin real, aksesorët, triangullin paralajmërues, gomën rezervë ose kit riparimi, xhupin reflektues dhe çdo pajisje tjetër të kërkuar nga ligji. Qiramarrësi është përgjegjës për kthimin e këtyre pajisjeve në gjendje të mirë pune; humbja, dëmtimi apo mungesa e tyre ngarkohet me koston përkatëse të zëvendësimit.",
@@ -485,126 +488,172 @@ function buildContractHTML(c, cars, stage) {
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Kontratë Qeraje ${contractNo}</title>
   <style>
-    body{font-family:Arial,sans-serif;margin:0;padding:24px;color:#0f172a;font-size:12px}
-    table{width:100%;border-collapse:collapse;margin-bottom:14px}
-    td,th{border:1px solid #cbd5e1;padding:6px 10px;font-size:11.5px;text-align:left;vertical-align:top}
-    th{background:#f1f5f9;width:34%;font-weight:700}
-    h2{margin:0 0 4px}
-    h3{margin:18px 0 8px;font-size:13px;border-bottom:2px solid #1d4ed8;padding-bottom:4px}
-    .hdr{background:#0f172a;color:#fff;padding:16px 20px;border-radius:8px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
-    .hdr .no{font-size:11px;opacity:.8;text-align:right;white-space:nowrap}
-    .sig{margin-top:10px}
-    .sig img{max-width:220px;border:1px solid #e2e8f0;border-radius:6px;display:block}
-    .sig .ts{font-size:10px;color:#64748b;margin-top:3px}
-    .photos{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
-    .photos img{width:92px;height:70px;object-fit:cover;border-radius:5px;border:1px solid #e2e8f0}
-    .terms{font-size:10.2px;color:#374151;line-height:1.65}
-    .terms .clause{margin-bottom:9px;page-break-inside:avoid}
-    .terms .ttl{font-weight:700;color:#0f172a;display:block;margin-bottom:2px}
+    @page{margin:16mm 14mm}
+    *{box-sizing:border-box}
+    body{font-family:'Helvetica Neue',Arial,sans-serif;margin:0;padding:0;color:#1e293b;font-size:12px;line-height:1.4}
+    table{width:100%;border-collapse:collapse;margin-bottom:2px}
+    td,th{padding:5px 10px;font-size:11px;text-align:left;vertical-align:top;border-bottom:1px solid #eef1f5}
+    th{color:#64748b;font-weight:600;width:38%}
+    td{color:#0f172a;font-weight:500}
+    .wrap{max-width:760px;margin:0 auto;padding:20px 0}
+    .letterhead{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #0f172a;padding-bottom:14px;margin-bottom:18px}
+    .letterhead .co-name{font-size:19px;font-weight:800;color:#0f172a;letter-spacing:0.2px}
+    .letterhead .co-contact{font-size:10px;color:#64748b;margin-top:4px;line-height:1.6}
+    .letterhead .doc-title{text-align:right}
+    .letterhead .doc-title h1{font-size:14px;margin:0;color:#0f172a;font-weight:700}
+    .letterhead .doc-title .sub-t{font-size:10px;color:#94a3b8}
+    .letterhead .doc-title .meta{font-size:10px;color:#475569;margin-top:6px;line-height:1.7}
+    .section{margin-bottom:16px}
+    .section-hd{font-size:11px;font-weight:800;color:#fff;background:#0f172a;padding:6px 10px;border-radius:5px 5px 0 0;letter-spacing:0.3px;text-transform:uppercase}
+    .section-hd .en{font-weight:400;opacity:.65;text-transform:none;font-size:10px}
+    .section-bd{border:1px solid #e2e8f0;border-top:none;border-radius:0 0 5px 5px;padding:2px 0}
+    .cols2{display:flex;gap:16px}
+    .cols2 > div{flex:1}
+    .sig-block{display:flex;gap:24px;margin-top:8px;page-break-inside:avoid}
+    .sig-block .box{flex:1;text-align:center}
+    .sig-block img{max-height:70px;max-width:100%;border-bottom:1px solid #94a3b8;padding-bottom:4px;margin-bottom:4px}
+    .sig-block .line{border-top:1px solid #94a3b8;margin-top:44px;padding-top:4px}
+    .sig-block .who{font-size:10px;font-weight:700;color:#0f172a}
+    .sig-block .ts{font-size:9px;color:#94a3b8}
+    .photos{display:flex;flex-wrap:wrap;gap:6px;margin:8px 10px}
+    .photos img{width:88px;height:66px;object-fit:cover;border-radius:5px;border:1px solid #e2e8f0}
+    .terms{font-size:9.3px;color:#334155;line-height:1.55;columns:1}
+    .terms .clause{margin-bottom:7px;page-break-inside:avoid}
+    .terms .ttl{font-weight:700;color:#0f172a;display:block}
     .terms .en{color:#64748b;font-style:italic}
-    .sub{font-weight:400;color:#64748b}
+    .foot-note{font-size:9px;color:#94a3b8;text-align:center;margin-top:18px;border-top:1px solid #e2e8f0;padding-top:8px}
     .page-break{page-break-before:always}
-    @media print{body{padding:8px}}
+    @media print{ .wrap{padding:0} }
   </style></head><body>
+  <div class="wrap">
 
-  <div class="hdr">
+  <div class="letterhead">
     <div>
-      <h2>📝 Kontratë Qeraje Automjeti</h2>
-      <div style="opacity:.8;font-size:11px">Vehicle Rental Agreement</div>
+      <div class="co-name">${companyName}</div>
+      ${contactLine?`<div class="co-contact">${contactLine}</div>`:""}
+      ${legalLine?`<div class="co-contact">${legalLine}</div>`:""}
     </div>
-    <div class="no">
-      Nr. Kontrate / Contract No: <strong>${contractNo}</strong><br/>
-      Rezervimi / Reservation: ${c.reservation_id?c.reservation_id.toString().slice(0,8).toUpperCase():""}<br/>
-      Gjeneruar / Generated: ${nowStr()}<br/>
-      ${companyName}
+    <div class="doc-title">
+      <h1>KONTRATË QERAJE AUTOMJETI</h1>
+      <div class="sub-t">Vehicle Rental Agreement</div>
+      <div class="meta">
+        Nr. / No: <strong>${contractNo}</strong><br/>
+        Data / Date: ${nowStr()}
+      </div>
     </div>
   </div>
 
-  <h3>👤 Të Dhënat e Klientit <span class="sub">/ Renter Information</span></h3>
-  <table>
-    ${row("Emri i Plotë / Full Name", c.client_name)}
-    ${row("Telefoni / Phone", c.client_phone)}
-    ${row("Email", c.client_email)}
-    ${row("Adresa / Address", c.client_address)}
-    ${row("Qyteti / City", c.client_city)}
-    ${row("Vendlindja / Place of Birth", c.client_pob)}
-    ${row("Datëlindja / Date of Birth", c.client_dob?fmtFull(c.client_dob):"")}
-    ${row("Nr. Patentë/ID / License-ID No.", c.license_number||c.client_id_card)}
-    ${row("Vendi i Lëshimit / Place of Issue", c.license_issue)}
-    ${row("Data e Lëshimit / Date of Issue", c.license_date_issue?fmtFull(c.license_date_issue):"")}
-    ${row("Skadimi i Patentës / License Expiry", c.license_expiry?fmtFull(c.license_expiry):"")}
-  </table>
+  <div class="cols2">
+    <div class="section">
+      <div class="section-hd">Të Dhënat e Klientit <span class="en">/ Renter</span></div>
+      <div class="section-bd"><table>
+        ${row("Emri / Name", c.client_name)}
+        ${row("Telefon / Phone", c.client_phone)}
+        ${row("Email", c.client_email)}
+        ${row("Adresa / Address", [c.client_address,c.client_city].filter(Boolean).join(", "))}
+        ${row("Vendlindja / Birthplace", c.client_pob)}
+        ${row("Datëlindja / Birth Date", c.client_dob?fmtFull(c.client_dob):"")}
+      </table></div>
+    </div>
+    <div class="section">
+      <div class="section-hd">Patenta & Automjeti <span class="en">/ License &amp; Vehicle</span></div>
+      <div class="section-bd"><table>
+        ${row("Nr. Patentë / License No.", c.license_number||c.client_id_card)}
+        ${row("Lëshuar / Issued", [c.license_issue,c.license_date_issue?fmtFull(c.license_date_issue):""].filter(Boolean).join(" · "))}
+        ${row("Skadon / Expires", c.license_expiry?fmtFull(c.license_expiry):"")}
+        ${row("Automjeti / Vehicle", carLbl+(carObj?.model?(" · "+carObj.model):""))}
+        ${row("Kategoria / Category", c.vehicle_category)}
+        ${row("Nr. Vendesh / Seats", c.vehicle_max_people)}
+      </table></div>
+    </div>
+  </div>
 
-  <h3>🚗 Automjeti <span class="sub">/ Vehicle</span></h3>
-  <table>
-    ${row("Makina / Model", carLbl+(carObj?.model?(" · "+carObj.model):""))}
-    ${row("Kategoria / Category", c.vehicle_category)}
-    ${row("Nr. Maksimal Pasagjerësh / Max People", c.vehicle_max_people)}
-  </table>
+  <div class="cols2">
+    <div class="section">
+      <div class="section-hd">Çmimi & Pagesa <span class="en">/ Pricing &amp; Payment</span></div>
+      <div class="section-bd"><table>
+        ${row("Çmimi Total / Total", c.total_price?fmtM(c.total_price,c.currency):"")}
+        ${row("Tarifa Shtesë / Extra Charges", c.extra_charges_note)}
+        ${row("Paguar / Paid", c.total_paid!=null&&c.total_paid!==""?fmtM(c.total_paid,c.currency):"")}
+        ${row("Mbetet / Balance Due", toBePaid!=null?fmtM(toBePaid,c.currency):"")}
+        ${row("Mënyra e Pagesës / Method", c.payment_method)}
+      </table></div>
+    </div>
+    <div class="section">
+      <div class="section-hd">Depozitë & Zbritje <span class="en">/ Deposit &amp; Deductibles</span></div>
+      <div class="section-bd"><table>
+        ${row("Depozitë / Deposit", c.deposit_amount?fmtM(c.deposit_amount,c.currency):"")}
+        ${row("Mënyra / Method", c.deposit_payment_method)}
+        ${row("Zbritje Vjedhje / Theft", c.theft_deductible?fmtM(c.theft_deductible,c.currency):"")}
+        ${row("Zbritje Dëmi / Damage", c.damage_deductible?fmtM(c.damage_deductible,c.currency):"")}
+        ${row("Kartë Garancie / Card", c.card_last4?((c.card_holder||"")+" "+(c.card_type||"")+" ****"+c.card_last4):"")}
+      </table></div>
+    </div>
+  </div>
 
-  <h3>💶 Çmimi <span class="sub">/ Pricing</span></h3>
-  <table>
-    ${row("Çmimi Total i Qerasë / Rental Total", c.total_price?fmtM(c.total_price,c.currency):"")}
-    ${row("Detaje Tarifash Shtesë / Extra Charges Detail", c.extra_charges_note)}
-    ${row("Shuma e Paguar / Amount Paid", c.total_paid!=null?fmtM(c.total_paid,c.currency):"")}
-    ${row("Mbetet për t'u Paguar / To Be Paid", toBePaid!=null?fmtM(toBePaid,c.currency):"")}
-    ${row("Mënyra e Pagesës / Payment Method", c.payment_method)}
-  </table>
-
-  <h3>🔒 Depozita & Zbritjet <span class="sub">/ Deposit &amp; Deductibles</span></h3>
-  <table>
-    ${row("Depozitë Garancie / Security Deposit", c.deposit_amount?fmtM(c.deposit_amount,c.currency):"")}
-    ${row("Mënyra e Depozitës / Deposit Method", c.deposit_payment_method)}
-    ${row("Zbritje Vjedhje/Zjarr / Theft-Fire Deductible", c.theft_deductible?fmtM(c.theft_deductible,c.currency):"")}
-    ${row("Zbritje Dëmtimesh / Damage Deductible", c.damage_deductible?fmtM(c.damage_deductible,c.currency):"")}
-    ${row("Zbritje Palë e Tretë / Third-Party Deductible", c.third_party_deductible?fmtM(c.third_party_deductible,c.currency):"")}
-  </table>
-
-  <h3>💳 Karta e Garancisë <span class="sub">/ Guarantee Card</span></h3>
-  <table>
-    ${row("Mbajtësi / Holder", c.card_holder)}
-    ${row("Lloji / Type", c.card_type)}
-    ${row("Numri / Number", c.card_last4?("**** **** **** "+c.card_last4):"")}
-    ${row("Skadimi / Expiry", c.card_expiry)}
-  </table>
-  <p style="font-size:10px;color:#64748b">Klienti autorizon qiradhënësin të tarifojë kartën e mësipërme për çdo kosto të lidhur me qeranë (karburant, dëmtime, gjoba, pastrim ekstra). / The customer authorizes the lessor to charge the above card for any cost related to the rental (fuel, damage, fines, extra cleaning).</p>
-
-  <h3>🚗 Marrja e Makinës <span class="sub">/ Pickup</span></h3>
-  <table>
-    ${row("Vendndodhja / Location", c.pickup_location)}
-    ${row("Data/Ora / Date-Time", c.pickup_datetime?fmtDT(c.pickup_datetime):"")}
-    ${row("Karburanti / Fuel Level", c.pickup_fuel)}
-    ${row("Km", c.pickup_km)}
-    ${row("Dëmtime (diagram) / Damage (diagram)", dmgList(c.pickup_damage))}
-    ${row("Përshkrim Dëmtimesh / Damage Description", c.pickup_damage_notes)}
-  </table>
-  ${photosGrid(c.pickup_photos)}
-  ${c.pickup_signature?`<div class="sig"><div style="font-size:10px;color:#94a3b8;text-transform:uppercase">Nënshkrimi i klientit / Renter's Signature (Pickup)</div><img src="${c.pickup_signature}"/><div class="ts">${c.pickup_signed_at?fmtDT(c.pickup_signed_at):""}</div></div>`:""}
+  <div class="section">
+    <div class="section-hd">🚗 Marrja e Makinës <span class="en">/ Pickup</span></div>
+    <div class="section-bd">
+      <table>
+        ${row("Vendndodhja / Location", c.pickup_location)}
+        ${row("Data/Ora / Date-Time", c.pickup_datetime?fmtDT(c.pickup_datetime):"")}
+        ${row("Karburanti / Fuel", c.pickup_fuel)}
+        ${row("Km", c.pickup_km)}
+        ${row("Dëmtime / Damage", [dmgList(c.pickup_damage),c.pickup_damage_notes].filter(Boolean).join(" — ")||"Nuk ka dëmtime të shënuara / No damage recorded")}
+      </table>
+      ${photosGrid(c.pickup_photos)}
+    </div>
+  </div>
 
   ${showDropoff?`
-  <h3>🏁 Kthimi i Makinës <span class="sub">/ Drop-off</span></h3>
-  <table>
-    ${row("Vendndodhja / Location", c.dropoff_location)}
-    ${row("Data/Ora / Date-Time", c.dropoff_datetime?fmtDT(c.dropoff_datetime):"")}
-    ${row("Karburanti / Fuel Level", c.dropoff_fuel)}
-    ${row("Km", c.dropoff_km)}
-    ${row("Dëmtime (diagram) / Damage (diagram)", dmgList(c.dropoff_damage))}
-    ${row("Përshkrim Dëmtimesh / Damage Description", c.dropoff_damage_notes)}
-  </table>
-  ${photosGrid(c.dropoff_photos)}
-  ${c.dropoff_signature?`<div class="sig"><div style="font-size:10px;color:#94a3b8;text-transform:uppercase">Nënshkrimi i klientit / Renter's Signature (Drop-off)</div><img src="${c.dropoff_signature}"/><div class="ts">${c.dropoff_signed_at?fmtDT(c.dropoff_signed_at):""}</div></div>`:""}
+  <div class="section">
+    <div class="section-hd">🏁 Kthimi i Makinës <span class="en">/ Drop-off</span></div>
+    <div class="section-bd">
+      <table>
+        ${row("Vendndodhja / Location", c.dropoff_location)}
+        ${row("Data/Ora / Date-Time", c.dropoff_datetime?fmtDT(c.dropoff_datetime):"")}
+        ${row("Karburanti / Fuel", c.dropoff_fuel)}
+        ${row("Km", c.dropoff_km)}
+        ${row("Dëmtime / Damage", [dmgList(c.dropoff_damage),c.dropoff_damage_notes].filter(Boolean).join(" — ")||"Nuk ka dëmtime të reja / No new damage recorded")}
+      </table>
+      ${photosGrid(c.dropoff_photos)}
+    </div>
+  </div>
   `:""}
 
-  <div class="page-break"></div>
-  <h3>📋 Kushtet e Përgjithshme <span class="sub">/ General Terms &amp; Conditions</span></h3>
-  <div class="terms">
-    ${TERMS.map(t=>`<div class="clause"><span class="ttl">${t[0]}</span>${t[1]}<br/><span class="en">${t[2]}</span></div>`).join("")}
+  <div class="sig-block">
+    <div class="box">
+      ${c.pickup_signature?`<img src="${c.pickup_signature}"/>`:`<div class="line"></div>`}
+      <div class="who">${c.client_name||"Qiramarrësi / Renter"}</div>
+      <div class="ts">${c.pickup_signed_at?("Marrje / Pickup: "+fmtDT(c.pickup_signed_at)):""}</div>
+    </div>
+    <div class="box">
+      ${showDropoff&&c.dropoff_signature?`<img src="${c.dropoff_signature}"/>`:`<div class="line"></div>`}
+      <div class="who">${c.client_name||"Qiramarrësi / Renter"}</div>
+      <div class="ts">${c.dropoff_signed_at?("Kthim / Drop-off: "+fmtDT(c.dropoff_signed_at)):""}</div>
+    </div>
+    <div class="box">
+      <div class="line"></div>
+      <div class="who">${companyName}</div>
+      <div class="ts">${c.created_by?("Agjenti / Agent: "+c.created_by):""}</div>
+    </div>
   </div>
 
-  <p style="margin-top:16px;font-size:10.5px;color:#64748b">
+  <div class="page-break"></div>
+  <div class="section">
+    <div class="section-hd">📋 Kushtet e Përgjithshme <span class="en">/ General Terms &amp; Conditions</span></div>
+    <div class="terms" style="margin-top:10px">
+      ${TERMS.map(t=>`<div class="clause"><span class="ttl">${t[0]}</span>${t[1]}<br/><span class="en">${t[2]}</span></div>`).join("")}
+    </div>
+  </div>
+
+  <p style="font-size:10px;color:#64748b;margin-top:10px">
     Nënshkruesi deklaron se ka lexuar dhe pranon kushtet e përgjithshme të qerasë të kompanisë.<br/>
     <span style="font-style:italic">The undersigned declares to have read and accepts the company's general rental terms.</span>
   </p>
+
+  <div class="foot-note">${companyName}${contactLine?" · "+contactLine:""}</div>
+  </div>
   </body></html>`;
 }
 function printContract(c, cars, stage) {
@@ -612,6 +661,7 @@ function printContract(c, cars, stage) {
   const w = window.open("", "_blank");
   if (w) { w.document.write(html); w.document.close(); setTimeout(()=>w.print(), 500); }
 }
+
 
 
 // ─── FAQJA E PLOTË E KONTRATËS (jo modal — faqe më vete) ──────────────────
@@ -639,6 +689,7 @@ function ContractEditor({r, sess, cars, addLog, onBack}) {
   });
 
   useEffect(()=>{
+    const carObj = cars.find(x=>x.name===r.car_name);
     sbAuthGet("rental_contracts","reservation_id=eq."+r.id,sess.token)
       .then(rows=>{
         if(rows&&rows[0]){
@@ -646,10 +697,20 @@ function ContractEditor({r, sess, cars, addLog, onBack}) {
           setExisting(c);
           setF(prev=>({...prev,...c,pickup_photos:c.pickup_photos||[],dropoff_photos:c.dropoff_photos||[]}));
           setStage(c.status==="pickup_done"?"dropoff":"pickup");
+        } else if(carObj?.damage_photos?.length){
+          // Kontratë e re — nis me galerinë e dëmtimeve të makinës si gjendje bazë
+          setF(prev=>({...prev,pickup_photos:[...carObj.damage_photos]}));
         }
         setLoading(false);
       }).catch(()=>setLoading(false));
   },[]);
+
+  function syncFromCarGallery(){
+    const carObj = cars.find(x=>x.name===r.car_name);
+    const base = carObj?.damage_photos||[];
+    if(!base.length){ alert("Kjo makinë nuk ka foto në galerinë e saj (Cilësime → Makinat → 🩹 Foto Dëmtimesh)."); return; }
+    setF(prev=>({...prev,pickup_photos:[...new Set([...(prev.pickup_photos||[]),...base])]}));
+  }
 
   function upd(k,v){ setF(x=>({...x,[k]:v})); }
   function sanitizeNum(body){
@@ -699,6 +760,14 @@ function ContractEditor({r, sess, cars, addLog, onBack}) {
       const body = sanitizeNum({...f, status:"completed", dropoff_signed_at:new Date().toISOString()});
       const [saved]=await sbAuthPatch("rental_contracts",existing.id,body,sess.token);
       setExisting(saved);
+      // Nese ka foto te reja demtimi ne dropoff, i shtojme ne galerine e perhershme te makines
+      if(f.dropoff_photos&&f.dropoff_photos.length){
+        const carObj = cars.find(x=>x.name===r.car_name);
+        if(carObj){
+          const merged=[...new Set([...(carObj.damage_photos||[]),...f.dropoff_photos])];
+          try { await sbAuthPatch("cars",carObj.id,{damage_photos:merged},sess.token); } catch(e){}
+        }
+      }
       addLog&&addLog("Kontratë Dropoff",r.car_name+" - "+r.client_name);
       printContract(saved,cars,"dropoff");
     } catch(e){ alert(e.message); }
@@ -792,8 +861,8 @@ function ContractEditor({r, sess, cars, addLog, onBack}) {
           <CarDamageDiagram points={f.pickup_damage} onChange={v=>upd("pickup_damage",v)}/>
           <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",margin:"12px 0 6px"}}>Përshkrim me Tekst i Dëmtimeve</label>
           <textarea value={f.pickup_damage_notes} onChange={e=>upd("pickup_damage_notes",e.target.value)} style={{...FL,height:50,resize:"vertical"}} placeholder="p.sh. Gërvishtje shumëfishe, ulëse shoferi..."/>
-          <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",margin:"14px 0 6px"}}>📷 Foto të Gjendjes / Dëmtimeve</label>
-          <PhotoUploader photos={f.pickup_photos} onChange={v=>upd("pickup_photos",v)} uploadFn={uploadPickupPhoto}/>
+          <div style={{fontSize:12,fontWeight:600,color:"#374151",display:"flex",alignItems:"center",gap:8,margin:"14px 0 6px"}}>📷 Foto të Gjendjes / Dëmtimeve <button type="button" onClick={syncFromCarGallery} style={{...IB,fontSize:10,padding:"3px 8px"}}>🔄 Sinkronizo nga makina</button></div>
+          <PhotoUploader photos={f.pickup_photos} onChange={v=>upd("pickup_photos",v)} uploadFn={uploadPickupPhoto} label="Foto të trashëguara nga galeria e makinës + çdo foto shtesë që shton këtu"/>
           <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",margin:"14px 0 6px"}}>Nënshkrimi i Klientit *</label>
           <SignaturePad value={f.pickup_signature} onChange={v=>upd("pickup_signature",v)}/>
         </div>
@@ -809,8 +878,8 @@ function ContractEditor({r, sess, cars, addLog, onBack}) {
           <CarDamageDiagram points={f.dropoff_damage} onChange={v=>upd("dropoff_damage",v)}/>
           <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",margin:"12px 0 6px"}}>Përshkrim me Tekst i Dëmtimeve</label>
           <textarea value={f.dropoff_damage_notes} onChange={e=>upd("dropoff_damage_notes",e.target.value)} style={{...FL,height:50,resize:"vertical"}} placeholder="p.sh. Gërvishtje shumëfishe, ulëse shoferi..."/>
-          <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",margin:"14px 0 6px"}}>📷 Foto të Gjendjes / Dëmtimeve</label>
-          <PhotoUploader photos={f.dropoff_photos} onChange={v=>upd("dropoff_photos",v)} uploadFn={uploadDropoffPhoto}/>
+          <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",margin:"14px 0 6px"}}>📷 Foto TË REJA Dëmtimesh (nëse janë gjetur në kthim)</label>
+          <PhotoUploader photos={f.dropoff_photos} onChange={v=>upd("dropoff_photos",v)} uploadFn={uploadDropoffPhoto} label="Këto shtohen automatikisht te galeria e makinës kur konfirmon kthimin"/>
           <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",margin:"14px 0 6px"}}>Nënshkrimi i Klientit *</label>
           <SignaturePad value={f.dropoff_signature} onChange={v=>upd("dropoff_signature",v)}/>
         </div>
@@ -818,7 +887,7 @@ function ContractEditor({r, sess, cars, addLog, onBack}) {
 
       <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16,marginBottom:30,flexWrap:"wrap"}}>
         <button onClick={saveDraft} disabled={saving} style={{...CB,fontWeight:700}}>{saving?"...":"💾 Ruaj Draft"}</button>
-        {existing&&<button onClick={()=>printContract(existing,cars,stage)} style={{...PB,background:"#475569"}}>🖨️ Shiko PDF</button>}
+        <button onClick={()=>printContract({...(existing||{}),...f,reservation_id:r.id,car_name:r.car_name},cars,stage)} style={{...PB,background:"#475569"}}>🖨️ Shiko PDF</button>
         {stage==="pickup"
           ? <button onClick={confirmPickup} disabled={saving} style={{...PB,background:"#059669"}}>{saving?"⏳...":"✅ Konfirmo Marrjen + PDF"}</button>
           : <button onClick={confirmDropoff} disabled={saving} style={{...PB,background:"#059669"}}>{saving?"⏳...":"✅ Konfirmo Kthimin + PDF"}</button>
@@ -4136,16 +4205,26 @@ function SetPage({sess,reload,addLog}) {
   const [importMsg,setImportMsg]=useState("");
   const [editCar,setEditCar]=useState(null);
   const [ecf,setEcf]=useState({});
+  const [damageCarId,setDamageCarId]=useState(null);
   const fileRef=useRef(null);
 
   // Branding state from localStorage
   const initBrand = JSON.parse(localStorage.getItem("crm_brand")||"{}");
   const [brandLogo,setBrandLogo] = useState(initBrand.logoUrl||"");
   const [brandName,setBrandName] = useState(initBrand.appName||"Car Rental Manager");
+  const [brandAddress,setBrandAddress] = useState(initBrand.companyAddress||"");
+  const [brandPhone,setBrandPhone] = useState(initBrand.companyPhone||"");
+  const [brandEmail,setBrandEmail] = useState(initBrand.companyEmail||"");
+  const [brandNipt,setBrandNipt] = useState(initBrand.companyNipt||"");
+  const [brandWebsite,setBrandWebsite] = useState(initBrand.companyWebsite||"");
   const [brandSaved,setBrandSaved] = useState(false);
 
   function saveBrand(){
-    localStorage.setItem("crm_brand", JSON.stringify({logoUrl:brandLogo, appName:brandName}));
+    localStorage.setItem("crm_brand", JSON.stringify({
+      logoUrl:brandLogo, appName:brandName,
+      companyAddress:brandAddress, companyPhone:brandPhone, companyEmail:brandEmail,
+      companyNipt:brandNipt, companyWebsite:brandWebsite
+    }));
     setBrandSaved(true);
     setTimeout(()=>setBrandSaved(false),1500);
     addLog("Ndrysho Branding", brandName);
@@ -4264,6 +4343,15 @@ function SetPage({sess,reload,addLog}) {
       addLog("Foto Makinë",car.name);
     } catch(e){alert("Upload dështoi: "+e.message);}
   }
+  async function uploadDamagePhotoForCar(car,file){
+    return sbUploadContractPhoto(file,"car_"+car.id,"baseline",sess.token);
+  }
+  async function saveDamagePhotos(car,newPhotos){
+    try {
+      await sbAuthPatch("cars",car.id,{damage_photos:newPhotos},sess.token);
+      setCars(cs=>cs.map(c=>c.id===car.id?{...c,damage_photos:newPhotos}:c));
+    } catch(e){ alert("Ruajtja dështoi: "+e.message); }
+  }
 
   if(loading) return <Spin/>;
 
@@ -4315,10 +4403,24 @@ function SetPage({sess,reload,addLog}) {
             <p style={{fontSize:11,color:"#94a3b8",margin:"8px 0 0"}}>Ky emër shfaqet në ekranin e login-it dhe navbar.</p>
           </div>
 
+          {/* Company contact info — used on printed contracts */}
+          <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,padding:18,marginBottom:16}}>
+            <h3 style={{margin:"0 0 4px",fontSize:14,fontWeight:700,color:"#0f172a"}}>🏢 Të Dhënat e Kompanisë</h3>
+            <p style={{fontSize:11,color:"#94a3b8",margin:"0 0 12px"}}>Këto shfaqen te koka dhe fundi i kontratës së qerasë (PDF), që klienti të dijë si t'ju kontaktojë.</p>
+            <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:10}}>
+              <Fld label="Adresa e Kompanisë" col2><input value={brandAddress} onChange={e=>setBrandAddress(e.target.value)} style={FL} placeholder="Rruga, Qyteti, Shqipëri"/></Fld>
+              <Fld label="Telefoni"><input value={brandPhone} onChange={e=>setBrandPhone(e.target.value)} style={FL} placeholder="+355 6X XXX XXXX"/></Fld>
+              <Fld label="Email"><input value={brandEmail} onChange={e=>setBrandEmail(e.target.value)} style={FL} placeholder="info@kompania.al"/></Fld>
+              <Fld label="NIPT / Nr. Regjistrimi"><input value={brandNipt} onChange={e=>setBrandNipt(e.target.value)} style={FL} placeholder="L12345678A"/></Fld>
+              <Fld label="Website (opsionale)"><input value={brandWebsite} onChange={e=>setBrandWebsite(e.target.value)} style={FL} placeholder="www.kompania.al"/></Fld>
+            </div>
+          </div>
+
           <button onClick={saveBrand} style={{...PB,width:"100%",padding:14,fontSize:14,background:brandSaved?"#16a34a":"#1d4ed8"}}>
             {brandSaved?"✅ Ruajtur!":"💾 Ruaj Branding"}
           </button>
         </div>
+
       )}
 
       {tab==="cars"&&(
@@ -4369,12 +4471,32 @@ function SetPage({sess,reload,addLog}) {
                   )}
                   <button onClick={()=>toggleCarActive(car)} style={{
                     width:"100%",padding:"7px 0",borderRadius:8,border:"1px solid "+(isActive?"#fca5a5":"#86efac"),
-                    background:isActive?"#fef2f2":"#f0fdf4",color:isActive?"#991b1b":"#166534",fontSize:12,fontWeight:700,cursor:"pointer"
+                    background:isActive?"#fef2f2":"#f0fdf4",color:isActive?"#991b1b":"#166534",fontSize:12,fontWeight:700,cursor:"pointer",marginBottom:6
                   }}>{isActive?"⏸️ Kalo Pasive":"▶️ Aktivizo"}</button>
+                  <button onClick={()=>setDamageCarId(car.id)} style={{
+                    width:"100%",padding:"7px 0",borderRadius:8,border:"1px solid #fde68a",
+                    background:"#fffbeb",color:"#92400e",fontSize:12,fontWeight:700,cursor:"pointer"
+                  }}>🩹 Foto Dëmtimesh ({(car.damage_photos||[]).length})</button>
                 </div>
               </div>;
             })}
           </div>
+
+          {damageCarId&&(()=>{
+            const car=cars.find(x=>x.id===damageCarId);
+            if(!car) return null;
+            return (
+              <Modal title={"🩹 Foto Dëmtimesh — "+(car.targa||car.name)} onClose={()=>setDamageCarId(null)}>
+                <p style={{fontSize:12,color:"#64748b",margin:"0 0 12px"}}>Këto foto shfaqen automatikisht si "gjendje bazë" çdo herë që krijohet një kontratë e re për këtë makinë. Kur dëmtimi riparohet, hiqe foton këtu.</p>
+                <PhotoUploader
+                  photos={car.damage_photos||[]}
+                  onChange={v=>saveDamagePhotos(car,v)}
+                  uploadFn={file=>uploadDamagePhotoForCar(car,file)}
+                  label="Ngarko foto të dëmtimeve aktuale të makinës"
+                />
+              </Modal>
+            );
+          })()}
 
           {editCar&&(
             <Modal title="✏️ Detajet e Makinës" onClose={()=>setEditCar(null)}>
