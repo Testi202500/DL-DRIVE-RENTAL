@@ -318,20 +318,101 @@ const DAMAGE_TYPES = ["scratch","dent","broken","missing"];
 const DAMAGE_COLOR = {scratch:"#f59e0b",dent:"#0ea5e9",broken:"#dc2626",missing:"#7c3aed"};
 const DAMAGE_SYMBOL = {scratch:"−",dent:"○",broken:"✕",missing:"▣"};
 const DAMAGE_LB = {scratch:"− Gërvishtje",dent:"○ Gropë",broken:"✕ Thyer",missing:"▣ Mungon"};
+const CAR_VIEWS = [
+  {key:"front", label:"Para"},
+  {key:"left",  label:"E Majtë"},
+  {key:"right", label:"E Djathtë"},
+  {key:"rear",  label:"Mbrapa"},
+  {key:"top",   label:"Sipër"},
+];
+const VIEW_LB = {front:"Para",left:"E Majtë",right:"E Djathtë",rear:"Mbrapa",top:"Sipër"};
+const VIEW_LB_EN = {front:"Front",left:"Left",right:"Right",rear:"Rear",top:"Top"};
+
+// ─── SILUETA E MAKINËS PËR ÇDO PAMJE (viewBox 0 0 300 160 për të gjitha) ───
+function CarViewShape({view}) {
+  if(view==="top"){
+    return <>
+      <rect x="40" y="26" width="220" height="108" rx="24" fill="#e2e8f0" stroke="#94a3b8" strokeWidth="1.5"/>
+      <rect x="72" y="26" width="156" height="108" rx="16" fill="#f1f5f9" stroke="#cbd5e1"/>
+      <rect x="95" y="34" width="110" height="26" rx="6" fill="#e2e8f0" stroke="#cbd5e1"/>
+      <circle cx="76" cy="26" r="9" fill="#94a3b8"/><circle cx="76" cy="134" r="9" fill="#94a3b8"/>
+      <circle cx="224" cy="26" r="9" fill="#94a3b8"/><circle cx="224" cy="134" r="9" fill="#94a3b8"/>
+    </>;
+  }
+  if(view==="left"||view==="right"){
+    const body = <>
+      <rect x="50" y="88" width="220" height="42" rx="12" fill="#e2e8f0" stroke="#94a3b8" strokeWidth="1.5"/>
+      <path d="M88,88 L112,48 Q122,38 136,38 L198,38 Q212,38 220,48 L244,88 Z" fill="#f1f5f9" stroke="#cbd5e1" strokeWidth="1.5"/>
+      <line x1="152" y1="38" x2="152" y2="88" stroke="#cbd5e1"/>
+      <line x1="204" y1="42" x2="204" y2="88" stroke="#cbd5e1"/>
+      <circle cx="102" cy="132" r="17" fill="#94a3b8" stroke="#64748b"/>
+      <circle cx="222" cy="132" r="17" fill="#94a3b8" stroke="#64748b"/>
+      <circle cx="102" cy="132" r="7" fill="#cbd5e1"/>
+      <circle cx="222" cy="132" r="7" fill="#cbd5e1"/>
+    </>;
+    return view==="left" ? body : <g transform="scale(-1,1) translate(-300,0)">{body}</g>;
+  }
+  if(view==="front"||view==="rear"){
+    const lightColor = view==="front" ? "#fbbf24" : "#f87171";
+    return <>
+      <rect x="80" y="30" width="140" height="100" rx="22" fill="#e2e8f0" stroke="#94a3b8" strokeWidth="1.5"/>
+      <rect x="98" y="44" width="104" height="34" rx="7" fill="#f1f5f9" stroke="#cbd5e1"/>
+      <circle cx="100" cy="118" r="11" fill={lightColor} stroke="#94a3b8"/>
+      <circle cx="200" cy="118" r="11" fill={lightColor} stroke="#94a3b8"/>
+      <rect x="70" y="108" width="18" height="28" rx="4" fill="#94a3b8"/>
+      <rect x="212" y="108" width="18" height="28" rx="4" fill="#94a3b8"/>
+      <rect x="120" y="100" width="60" height="10" rx="3" fill="#cbd5e1"/>
+    </>;
+  }
+  return null;
+}
+
+// ─── I njëjti siluet, si STRING SVG (për ta ngulitur në HTML-në e printuar) ─
+function carViewShapeSVGString(view){
+  if(view==="top"){
+    return `<rect x="40" y="26" width="220" height="108" rx="24" fill="#e2e8f0" stroke="#94a3b8" stroke-width="1.5"/><rect x="72" y="26" width="156" height="108" rx="16" fill="#f1f5f9" stroke="#cbd5e1"/><rect x="95" y="34" width="110" height="26" rx="6" fill="#e2e8f0" stroke="#cbd5e1"/><circle cx="76" cy="26" r="9" fill="#94a3b8"/><circle cx="76" cy="134" r="9" fill="#94a3b8"/><circle cx="224" cy="26" r="9" fill="#94a3b8"/><circle cx="224" cy="134" r="9" fill="#94a3b8"/>`;
+  }
+  if(view==="left"||view==="right"){
+    const body = `<rect x="50" y="88" width="220" height="42" rx="12" fill="#e2e8f0" stroke="#94a3b8" stroke-width="1.5"/><path d="M88,88 L112,48 Q122,38 136,38 L198,38 Q212,38 220,48 L244,88 Z" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5"/><line x1="152" y1="38" x2="152" y2="88" stroke="#cbd5e1"/><line x1="204" y1="42" x2="204" y2="88" stroke="#cbd5e1"/><circle cx="102" cy="132" r="17" fill="#94a3b8" stroke="#64748b"/><circle cx="222" cy="132" r="17" fill="#94a3b8" stroke="#64748b"/><circle cx="102" cy="132" r="7" fill="#cbd5e1"/><circle cx="222" cy="132" r="7" fill="#cbd5e1"/>`;
+    return view==="left" ? body : `<g transform="scale(-1,1) translate(-300,0)">${body}</g>`;
+  }
+  if(view==="front"||view==="rear"){
+    const lightColor = view==="front" ? "#fbbf24" : "#f87171";
+    return `<rect x="80" y="30" width="140" height="100" rx="22" fill="#e2e8f0" stroke="#94a3b8" stroke-width="1.5"/><rect x="98" y="44" width="104" height="34" rx="7" fill="#f1f5f9" stroke="#cbd5e1"/><circle cx="100" cy="118" r="11" fill="${lightColor}" stroke="#94a3b8"/><circle cx="200" cy="118" r="11" fill="${lightColor}" stroke="#94a3b8"/><rect x="70" y="108" width="18" height="28" rx="4" fill="#94a3b8"/><rect x="212" y="108" width="18" height="28" rx="4" fill="#94a3b8"/><rect x="120" y="100" width="60" height="10" rx="3" fill="#cbd5e1"/>`;
+  }
+  return "";
+}
+// Gjeneron një diagram SVG të vogël (me pikat e dëmtimit) për çdo pamje që ka të paktën një dëmtim
+function damageDiagramSVGBlock(points){
+  if(!points||!points.length) return "";
+  const presentViews = [...new Set(points.map(p=>p.view||"top"))];
+  const order = CAR_VIEWS.map(v=>v.key).filter(k=>presentViews.includes(k));
+  return `<div class="dmg-diagrams">${order.map(view=>{
+    const pts = points.filter(p=>(p.view||"top")===view);
+    const dots = pts.map(p=>`<circle cx="${p.x}" cy="${p.y}" r="9" fill="${DAMAGE_COLOR[p.type]}" stroke="#fff" stroke-width="1.8"/><text x="${p.x}" y="${p.y+3.5}" text-anchor="middle" font-size="10" fill="#fff" font-weight="800">${DAMAGE_SYMBOL[p.type]}</text>`).join("");
+    return `<div class="dmg-diagram-box">
+      <svg viewBox="0 0 300 160" width="160" height="86">${carViewShapeSVGString(view)}${dots}</svg>
+      <div class="dmg-diagram-label">${VIEW_LB[view]} / ${VIEW_LB_EN[view]}</div>
+    </div>`;
+  }).join("")}</div>`;
+}
 
 function CarDamageDiagram({points,onChange,readOnly}) {
   const [nextType,setNextType]=useState(0);
+  const [view,setView]=useState("front");
+  const viewPoints = (points||[]).map((p,idx)=>({...p,_idx:idx})).filter(p=>(p.view||"top")===view);
+
   function addPoint(e) {
     if(readOnly) return;
     const rect=e.currentTarget.getBoundingClientRect();
     const x=Number(((e.clientX-rect.left)/rect.width*300).toFixed(0));
     const y=Number(((e.clientY-rect.top)/rect.height*160).toFixed(0));
-    onChange([...(points||[]),{x,y,type:DAMAGE_TYPES[nextType]}]);
+    onChange([...(points||[]),{x,y,type:DAMAGE_TYPES[nextType],view}]);
   }
-  function removePoint(i,e) {
+  function removePoint(realIdx,e) {
     e.stopPropagation();
     if(readOnly) return;
-    onChange(points.filter((_,idx)=>idx!==i));
+    onChange(points.filter((_,idx)=>idx!==realIdx));
   }
 
   return (
@@ -348,23 +429,30 @@ function CarDamageDiagram({points,onChange,readOnly}) {
           ))}
         </div>
       )}
+      <div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}}>
+        {CAR_VIEWS.map(v=>{
+          const cnt=(points||[]).filter(p=>(p.view||"top")===v.key).length;
+          return (
+            <button key={v.key} type="button" onClick={()=>setView(v.key)} style={{
+              padding:"5px 11px",borderRadius:8,fontSize:11,fontWeight:700,cursor:"pointer",
+              border:"1.5px solid "+(view===v.key?"#1d4ed8":"#e2e8f0"),
+              background:view===v.key?"#1d4ed8":"#fff",
+              color:view===v.key?"#fff":"#475569"
+            }}>{v.label}{cnt>0?" ("+cnt+")":""}</button>
+          );
+        })}
+      </div>
       <svg viewBox="0 0 300 160" onClick={addPoint} style={{width:"100%",background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,cursor:readOnly?"default":"crosshair",display:"block"}}>
-        {/* siluetë makine e thjeshtuar, pamje nga sipër */}
-        <rect x="40" y="26" width="220" height="108" rx="24" fill="#e2e8f0" stroke="#94a3b8" strokeWidth="1.5"/>
-        <rect x="72" y="26" width="156" height="108" rx="16" fill="#f1f5f9" stroke="#cbd5e1"/>
-        <rect x="95" y="34" width="110" height="26" rx="6" fill="#e2e8f0" stroke="#cbd5e1"/>
-        <circle cx="76" cy="26" r="9" fill="#94a3b8"/><circle cx="76" cy="134" r="9" fill="#94a3b8"/>
-        <circle cx="224" cy="26" r="9" fill="#94a3b8"/><circle cx="224" cy="134" r="9" fill="#94a3b8"/>
-        <text x="150" y="12" textAnchor="middle" fontSize="9" fill="#94a3b8">PARA</text>
-        <text x="150" y="152" textAnchor="middle" fontSize="9" fill="#94a3b8">MBRAPA</text>
-        {(points||[]).map((p,i)=>(
-          <g key={i} onClick={e=>removePoint(i,e)} style={{cursor:readOnly?"default":"pointer"}}>
+        <CarViewShape view={view}/>
+        <text x="150" y="14" textAnchor="middle" fontSize="10" fontWeight="700" fill="#94a3b8">{VIEW_LB[view].toUpperCase()}</text>
+        {viewPoints.map(p=>(
+          <g key={p._idx} onClick={e=>removePoint(p._idx,e)} style={{cursor:readOnly?"default":"pointer"}}>
             <circle cx={p.x} cy={p.y} r="8" fill={DAMAGE_COLOR[p.type]} stroke="#fff" strokeWidth="1.5"/>
             <text x={p.x} y={p.y+3} textAnchor="middle" fontSize="9" fill="#fff" fontWeight="800">{DAMAGE_SYMBOL[p.type]}</text>
           </g>
         ))}
       </svg>
-      {!readOnly&&<div style={{fontSize:10,color:"#94a3b8",marginTop:4}}>Kliko mbi makinë për të shënuar dëmtim · Kliko mbi shenjën për ta hequr</div>}
+      {!readOnly&&<div style={{fontSize:10,color:"#94a3b8",marginTop:4}}>Zgjidh pamjen (Para/E Majtë/E Djathtë/Mbrapa/Sipër) · Kliko mbi makinë për të shënuar dëmtim · Kliko mbi shenjën për ta hequr</div>}
     </div>
   );
 }
@@ -467,7 +555,11 @@ function buildContractHTML(c, cars, stage) {
 
   function dmgList(pts){
     if(!pts||!pts.length) return "";
-    return pts.map(p=>DAMAGE_LB[p.type]+" / "+DAMAGE_LB_EN[p.type]).join(", ");
+    return pts.map(p=>{
+      const vLb = VIEW_LB[p.view||"top"]||"";
+      const vLbEn = VIEW_LB_EN[p.view||"top"]||"";
+      return vLb+" — "+DAMAGE_LB[p.type]+" / "+vLbEn+" — "+DAMAGE_LB_EN[p.type];
+    }).join("; ");
   }
   function photosGrid(urls){
     if(!urls||!urls.length) return "";
@@ -555,6 +647,10 @@ function buildContractHTML(c, cars, stage) {
     .stamp-official .txt2{font-size:5.3px;color:#475569;letter-spacing:0.6px;margin-top:1px}
     .photos{display:flex;flex-wrap:wrap;gap:6px;margin:8px 10px}
     .photos img{width:88px;height:66px;object-fit:cover;border-radius:5px;border:1px solid #e2e8f0}
+    .dmg-diagrams{display:flex;flex-wrap:wrap;gap:10px;margin:8px 10px}
+    .dmg-diagram-box{text-align:center}
+    .dmg-diagram-box svg{background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;display:block}
+    .dmg-diagram-label{font-size:8.5px;color:#64748b;margin-top:3px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px}
     .terms{font-size:9.3px;color:#334155;line-height:1.55;columns:1}
     .terms .clause{margin-bottom:7px;page-break-inside:avoid}
     .terms .ttl{font-weight:700;color:#0f172a;display:block}
@@ -651,8 +747,9 @@ function buildContractHTML(c, cars, stage) {
         ${row("Data/Ora / Date-Time", c.pickup_datetime?fmtDT(c.pickup_datetime):"")}
         ${row("Karburanti / Fuel", c.pickup_fuel)}
         ${row("Km", c.pickup_km)}
-        ${row("Dëmtime / Damage", [dmgList(c.pickup_damage),c.pickup_damage_notes].filter(Boolean).join(" — ")||"Nuk ka dëmtime të shënuara / No damage recorded")}
+        ${row("Shënime Dëmtimi / Damage Notes", c.pickup_damage_notes)}
       </table>
+      ${damageDiagramSVGBlock(c.pickup_damage)||`<div style="padding:6px 10px;font-size:10px;color:#94a3b8">Nuk ka dëmtime të shënuara në diagram / No damage marked on diagram</div>`}
       ${photosGrid(c.pickup_photos)}
     </div>
   </div>
@@ -666,8 +763,9 @@ function buildContractHTML(c, cars, stage) {
         ${row("Data/Ora / Date-Time", c.dropoff_datetime?fmtDT(c.dropoff_datetime):"")}
         ${row("Karburanti / Fuel", c.dropoff_fuel)}
         ${row("Km", c.dropoff_km)}
-        ${row("Dëmtime / Damage", [dmgList(c.dropoff_damage),c.dropoff_damage_notes].filter(Boolean).join(" — ")||"Nuk ka dëmtime të reja / No new damage recorded")}
+        ${row("Shënime Dëmtimi / Damage Notes", c.dropoff_damage_notes)}
       </table>
+      ${damageDiagramSVGBlock(c.dropoff_damage)||`<div style="padding:6px 10px;font-size:10px;color:#94a3b8">Nuk ka dëmtime të reja në diagram / No new damage marked on diagram</div>`}
       ${photosGrid(c.dropoff_photos)}
     </div>
   </div>
