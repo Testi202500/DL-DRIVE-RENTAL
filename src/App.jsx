@@ -440,27 +440,47 @@ function buildContractHTML(c, cars, stage) {
     if(!urls||!urls.length) return "";
     return `<div class="photos">${urls.map(u=>`<img src="${u}"/>`).join("")}</div>`;
   }
+  function row(lbl,val){ return val?`<tr><th>${lbl}</th><td>${val}</td></tr>`:`<tr><th>${lbl}</th><td>—</td></tr>`; }
   const showDropoff = stage==="dropoff" || c.status==="completed" || !!c.dropoff_signature;
+  const toBePaid = (c.total_price!=null && c.total_paid!=null) ? (Number(c.total_price)-Number(c.total_paid)) : null;
 
-  const TERMS_AL = [
-    "Qiramarrësi konfirmon se ka marrë automjetin në gjendjen e përshkruar më sipër dhe pranon ta kthejë në të njëjtën gjendje, me përjashtim të konsumit normal.",
-    "Depozita e garancisë do të kthehet plotësisht nëse automjeti kthehet pa dëmtime të reja, brenda afatit të përcaktuar dhe me nivel karburanti të njëjtë me atë të marrjes.",
-    "Çdo dëmtim, gjobë apo shkelje e rregullave gjatë periudhës së qerasë është përgjegjësi e plotë e qiramarrësit.",
-    "Automjeti nuk lejohet të përdoret jashtë territorit të Republikës së Shqipërisë pa miratim paraprak me shkrim nga qiradhënësi.",
-    "Në rast aksidenti apo dëmtimi, qiramarrësi është i detyruar të njoftojë menjëherë qiradhënësin dhe autoritetet përkatëse.",
-    "Vonesa në kthimin e automjetit tarifohet shtesë sipas çmimit ditor, përveç rasteve të komunikuara dhe miratuara paraprakisht.",
-    "Qiradhënësi nuk mban përgjegjësi për sende personale të lëna në automjet.",
-    "Nënshkrimi i kësaj kontrate nënkupton pranimin e plotë të kushteve të mësipërme nga ana e qiramarrësit."
-  ];
-  const TERMS_EN = [
-    "The renter confirms receiving the vehicle in the condition described above and agrees to return it in the same condition, normal wear excepted.",
-    "The security deposit will be fully refunded if the vehicle is returned without new damage, within the agreed time, and with the same fuel level as at pickup.",
-    "Any damage, fine, or traffic violation during the rental period is the sole responsibility of the renter.",
-    "The vehicle may not be used outside the territory of the Republic of Albania without prior written approval from the lessor.",
-    "In case of accident or damage, the renter must immediately notify the lessor and the relevant authorities.",
-    "Late return of the vehicle is charged additionally at the daily rate, except when communicated and approved in advance.",
-    "The lessor is not responsible for personal belongings left in the vehicle.",
-    "Signing this contract implies full acceptance of the above terms by the renter."
+  const TERMS = [
+    ["A) Sigurimi dhe Pajisjet","Automjeti mbulohet nga sigurimi i detyrueshëm ndaj palëve të treta sipas legjislacionit shqiptar. Automjeti dorëzohet me kilometrazhin real, aksesorët, triangullin paralajmërues, gomën rezervë ose kit riparimi, xhupin reflektues dhe çdo pajisje tjetër të kërkuar nga ligji. Qiramarrësi është përgjegjës për kthimin e këtyre pajisjeve në gjendje të mirë pune; humbja, dëmtimi apo mungesa e tyre ngarkohet me koston përkatëse të zëvendësimit.",
+     "A) Insurance and Equipment. The vehicle is covered by mandatory third-party liability insurance under Albanian law. The vehicle is delivered with the actual mileage, accessories, warning triangle, spare wheel or repair kit, reflective vest, and any other equipment required by law. The renter is responsible for returning this equipment in good working condition; its loss, damage, or absence will be charged at the corresponding replacement cost."],
+    ["B) Dorëzimi dhe Kthimi i Automjetit","Qiraja fillon në ditën dhe orën e dorëzimit të automjetit te qiramarrësi dhe përfundon në ditën dhe orën e kthimit të tij te qiradhënësi. Automjeti dorëzohet në gjendje të mirë dhe duhet kthyer në të njëjtën gjendje, me përjashtim të konsumit normal. Nëse në momentin e kthimit konstatohen dëmtime të reja, qiradhënësi do të informojë qiramarrësin, do t'i paraqesë foto dhe do t'i kërkojë komente përpara se të vazhdojë me faturimin e dëmit. Një tolerancë prej 59 minutash lejohet përtej orës së përcaktuar për kthim; përtej kësaj toleranca, ngarkohet një ditë shtesë qiraje me çmimin ditor plus 50%. Nëse qiramarrësi nuk paraqitet dhe nuk kontaktohet dot deri në orën 12:00 të ditës së kthimit të parashikuar, rasti mund t'i kalohet autoriteteve kompetente si përvetësim i paligjshëm i automjetit, dhe çdo ditë e mëtejshme vonese ngarkohet me çmimin ditor plus 100%. Nëse çelësat nuk kthehen (humbje, dëmtim, apo manipulim), qiramarrësi mban përgjegjësi për një penalitet të paracaktuar; e njëjta gjë vlen për humbjen apo dëmtimin e targës së automjetit.",
+     "B) Delivery and Return of the Vehicle. The rental starts on the day and time the vehicle is delivered to the renter and ends on the day and time it is returned to the lessor. The vehicle is delivered in good condition and must be returned in the same condition, normal wear excepted. If new damage is found upon return, the lessor will inform the renter, provide photos, and request comments before proceeding with any charge. A 59-minute tolerance is allowed beyond the agreed return time; beyond that, an extra rental day is charged at the daily rate plus 50%. If the renter does not appear and cannot be reached by 12:00 on the scheduled return day, the matter may be referred to the competent authorities as unlawful appropriation of the vehicle, and each further day of delay is charged at the daily rate plus 100%. If the keys are not returned (lost, damaged, or tampered with), the renter is liable for a predetermined penalty; the same applies to loss or damage of the vehicle's license plate."],
+    ["C) Depozita e Garancisë me Kartë","Qiramarrësi (shoferi kryesor) duhet të paraqesë një kartë krediti/debiti ose një shumë cash si garanci për shërbimin e qerasë. Shuma e depozitës është ajo e specifikuar në këtë kontratë. Depozita çlirohet plotësisht ose pjesërisht kundrejt shumave që i detyrohen qiradhënësit sipas nenit H më poshtë. Qiramarrësi autorizon përdorimin e kartës/shumës së dhënë si mjeti i vetëm pagese për çdo detyrim që lind nga kjo kontratë.",
+     "C) Security Deposit with Card. The renter (main driver) must provide a credit/debit card or a cash amount as guarantee for the rental service. The deposit amount is as specified in this contract. The deposit is released in whole or in part against amounts owed to the lessor under section H below. The renter authorizes the use of the provided card/amount as the sole means of payment for any obligation arising from this contract."],
+    ["D) Mirëmbajtja e Automjetit","Qiramarrësi merr përsipër ta përdorë automjetin me kujdes dhe do të mbajë përgjegjësi për çdo dëmtim të shkaktuar, përveç rasteve kur provohet se dëmtimi vjen nga shkaqe që nuk i atribuohen atij. Qiramarrësi duhet të kontrollojë rregullisht nivelet e vajit, lëngut ftohës dhe frenave, dhe në çdo rast të paktën çdo 1000 km të përshkuar. Kostot e parkimit, larjes dhe riparimit të gomave të shpuara janë përgjegjësi e qiramarrësit. Në rast defekti apo prishjeje, qiramarrësi duhet të kontaktojë menjëherë qiradhënësin për asistencë dhe/ose zëvendësim të mundshëm të automjetit.",
+     "D) Vehicle Maintenance. The renter undertakes to use the vehicle carefully and will be held responsible for any damage caused, unless proven that the damage resulted from causes not attributable to them. The renter must regularly check oil, coolant, and brake fluid levels, and in any case at least every 1000 km driven. Costs for parking, washing, and repairing flat tires are the renter's responsibility. In case of breakdown, the renter must immediately contact the lessor for assistance and/or possible vehicle replacement."],
+    ["E) Përdorimi i Automjetit","Automjeti mund të drejtohet vetëm nga qiramarrësi ose nga shoferë shtesë të deklaruar shprehimisht në këtë kontratë, të gjithë mbi moshën 21 vjeç, me leje drejtimi valide prej të paktën 12 muajsh dhe një dokument identifikimi tjetër valid. Lejet e drejtimit të shkruara me alfabet jo-latin duhen shoqëruar me leje drejtimi ndërkombëtare. Ndalohet rreptësisht: (a) transporti i mallrave të paligjshme; (b) transporti i pasagjerëve me pagesë; (c) pjesëmarrja në gara apo prova shpejtësie; (d) udhëtimi jashtë territorit të rënë dakord pa miratim me shkrim; (e) nënqiraja apo huazimi i papërgjegjshëm te palë të treta; (f) drejtimi nën ndikimin e alkoolit apo substancave narkotike ose në kundërshtim me Kodin Rrugor. Çdo shkelje e Kodit Rrugor konsiderohet shkelje e detyrimeve kontraktuale të shoferit.",
+     "E) Use of the Vehicle. The vehicle may only be driven by the renter or by additional drivers explicitly declared in this contract, all over 21 years old, holding a valid driving license for at least 12 months and another valid identification document. Licenses printed in a non-Latin alphabet must be accompanied by an international driving license. It is strictly forbidden to: (a) transport illegal goods; (b) transport paying passengers; (c) participate in races or speed trials; (d) travel outside the agreed territory without written approval; (e) sub-rent or irresponsibly lend the vehicle to third parties; (f) drive under the influence of alcohol or drugs or in violation of the Road Code. Any breach of the Road Code is considered a breach of the driver's contractual obligations."],
+    ["F) Zbritjet për Dëmtim dhe Vjedhje","Kontrata përfshin një zbritje bazë (franshizë) për dëmtime aksidentale dhe një zbritje bazë për vjedhje/zjarr, siç specifikohen në tabelën e depozitës dhe zbritjeve më sipër. Këto zbritje nuk përbëjnë policë sigurimi, por një kufizim konvencional të përgjegjësisë financiare të qiramarrësit. Zbritjet nuk aplikohen (qiramarrësi mban përgjegjësi të plotë) në rast mashtrimi, faji të rëndë, shkeljeje të neneve D/E të kësaj kontrate, ose mos-kthimi të çelësave të automjetit.",
+     "F) Damage and Theft Deductibles. The contract includes a base deductible for accidental damage and a base deductible for theft/fire, as specified in the deposit and deductibles table above. These deductibles do not constitute an insurance policy but a conventional limitation of the renter's financial liability. The deductibles do not apply (renter bears full liability) in case of fraud, gross negligence, breach of sections D/E of this contract, or failure to return the vehicle keys."],
+    ["G) Aksidentet dhe Dëmtimet","Në rast aksidenti, qiramarrësi duhet: (a) të njoftojë menjëherë qiradhënësin dhe të plotësojë e dërgojë brenda 48 orësh formularin e deklaratës së përbashkët të aksidentit (nëse ka); (b) të njoftojë autoritetin më të afërt të policisë; (c) të shënojë emrat, adresat dhe targat e personave/automjeteve të përfshira si dhe të dhënat e dëshmitarëve; (d) t'i ofrojë qiradhënësit çdo informacion të dobishëm; (e) të ndjekë udhëzimet e qiradhënësit lidhur me ruajtjen dhe riparimin e automjetit. Në rast vjedhjeje, qiramarrësi duhet të njoftojë policinë dhe t'i dorëzojë qiradhënësit një kopje të denoncimit. Mos-kthimi i çelësave apo telekomandës së alarmit ngarkon qiramarrësin me përgjegjësi të plotë financiare për automjetin.",
+     "G) Accidents and Damage. In case of an accident, the renter must: (a) immediately notify the lessor and complete and send within 48 hours the joint accident statement form (if any); (b) notify the nearest police authority; (c) record the names, addresses, and plates of persons/vehicles involved as well as witness details; (d) provide the lessor with any useful information; (e) follow the lessor's instructions regarding the custody and repair of the vehicle. In case of theft, the renter must notify the police and deliver a copy of the report to the lessor. Failure to return the keys or alarm remote makes the renter fully financially liable for the vehicle."],
+    ["H) Pagesat","Qiramarrësi pranon t'i paguajë qiradhënësit: 1) koston e qerasë sipas kësaj kontrate; 2) tarifën shtesë nëse automjeti kthehet në një vendndodhje tjetër nga ajo e dorëzimit; 3) koston e rikthimit të nivelit të karburantit siç ishte në dorëzim; 4) shumat për zbritje dëmtimesh/vjedhjeje siç parashikohet në nenet C, F dhe G; 5) taksa rrugore, tarifa aeroporti apo pikash të tjera të veçanta; 6) shumën e çdo gjobe apo tarife parkimi/pedazhi që lidhet me përdorimin e automjetit gjatë periudhës së qerasë, përfshirë ato të njoftuara pas mbylljes së kontratës; 7) rimbursimin e shpenzimeve të bëra nga qiradhënësi për arkëtimin e shumave të papaguara; 8) çdo shërbim tjetër shtesë të kërkuar dhe ofruar gjatë qerasë.",
+     "H) Payments. The renter agrees to pay the lessor: 1) the rental cost under this contract; 2) an extra charge if the vehicle is returned to a location different from where it was delivered; 3) the cost of restoring the fuel level to what it was at delivery; 4) amounts for damage/theft deductibles as provided in sections C, F, and G; 5) road tolls, airport fees, or other special location fees; 6) the amount of any fine or parking/toll fee related to the use of the vehicle during the rental period, including those notified after the contract closes; 7) reimbursement of expenses incurred by the lessor in collecting unpaid amounts; 8) any other additional service requested and provided during the rental."],
+    ["I) Përgjegjësia e Qiradhënësit","Duke marrë parasysh përgjegjësinë e prodhuesit të automjetit për defekte prodhimi, qiradhënësi do të kryejë të gjitha veprimet e mirëmbajtjes së zakonshme për të siguruar që automjeti ofrohet në gjendje të mirë funksionimi, duke garantuar mirëmbajtjen e vazhdueshme të kërkuar në përputhje me përdorimin e tij.",
+     "I) Lessor's Responsibility. Taking into account the vehicle manufacturer's responsibility for construction defects, the lessor will perform all ordinary maintenance activities to ensure the vehicle is provided in good working order, guaranteeing the continuous maintenance required in relation to its use."],
+    ["L) Moscedimi","Qiramarrësi merr përsipër të mos ia kalojë, transferojë, hipotekojë apo lërë peng automjetin, aksesorët, pajisjet apo ndonjë pjesë tjetër të tij, dhe të mos kryejë asnjë veprim në kundërshtim me të drejtën e qiradhënësit si pronar i automjetit.",
+     "L) No Assignment. The renter undertakes not to assign, transfer, mortgage, or pledge the vehicle, its accessories, equipment, or any other part thereof, and not to carry out any act contrary to the lessor's right as owner of the vehicle."],
+    ["M) Automjet Zëvendësues","Qiradhënësi ruan të drejtën të mos ofrojë automjet zëvendësues në rast aksidenti, vjedhjeje, defekti apo çdo ngjarjeje tjetër, pa qenë i detyruar të justifikojë refuzimin e tij.",
+     "M) Replacement Vehicle. The lessor reserves the right not to provide a replacement vehicle in case of accident, theft, fault, damage, or any other event, without being obliged to justify such refusal."],
+    ["N) Juridiksioni","Për çdo mosmarrëveshje që lind nga ose lidhet me këtë kontratë, veçanërisht për arkëtimin e detyrueshëm të detyrimeve ndaj qiradhënësit, kompetente do të jetë gjykata e vendit ku është regjistruar qiradhënësi, në përputhje me legjislacionin shqiptar në fuqi.",
+     "N) Jurisdiction. For any dispute arising from or related to this contract, particularly for the mandatory collection of debts owed to the lessor, the competent court will be that of the lessor's place of registration, in accordance with applicable Albanian law."],
+    ["O) Sende të Humbura","Qiradhënësi nuk mban asnjë përgjegjësi për humbjen e sendeve që qiramarrësi apo palë të treta mund të kenë lënë apo ngarkuar në automjet, gjatë ose pas periudhës së qerasë. Nëse gjenden sende brenda automjetit, qiradhënësi do të njoftojë menjëherë qiramarrësin; ky i fundit mund t'i rimarrë personalisht apo përmes një kurieri brenda 3 muajve nga gjetja, me shpenzimet e veta. Pas kësaj periudhe, sendet konsiderohen të braktisura.",
+     "O) Lost Items. The lessor bears no responsibility for the loss of items that the renter or third parties may have left or loaded in the vehicle, during or after the rental period. If items are found inside the vehicle, the lessor will promptly notify the renter, who may recover them personally or through a courier within 3 months of the find, at their own expense. After this period, the items are considered abandoned."],
+    ["P) Interpretimi","Në rast konflikti në interpretimin e versionit shqip dhe versionit anglisht të kësaj kontrate, versioni shqip mbizotëron.",
+     "P) Interpretation. In case of conflict in the interpretation of the Albanian and English versions of this contract, the Albanian version shall prevail."],
+    ["Q) Ndryshimet","Çdo ndryshim apo shtesë e kushteve të përgjithshme të kësaj kontrate nuk ka fuqi detyruese nëse nuk është rënë dakord me shkrim.",
+     "Q) Amendments. Any amendment or addition to the general terms of this contract shall not be binding unless agreed upon in writing."],
+    ["R) Pranimi i Kushteve të Kontratës","Qiramarrësi, me nënshkrimin e tij, pranon të marrë me qera automjetin e treguar me çmimet dhe kushtet e specifikuara në këtë kontratë dhe autorizon qiradhënësin të tarifojë kartën e garancisë të deklaruar. Qiramarrësi deklaron se ka shqyrtuar kushtet e përgjithshme të qerasë.",
+     "R) Acceptance of Contract Terms. The renter, by signing, agrees to rent the indicated vehicle at the rates and conditions specified in this contract and authorizes the lessor to charge the declared guarantee card. The renter declares to have reviewed the general rental terms."],
+    ["S) Kushte me Miratim të Veçantë","Qiramarrësi deklaron shprehimisht se pranon veçanërisht kushtet e neneve B, D, F, G, H, I, L, N, O dhe R të kësaj kontrate, në përputhje me parimet e së drejtës kontraktore shqiptare mbi klauzolat e miratuara posaçërisht.",
+     "S) Specially Approved Conditions. The renter expressly declares acceptance of the conditions under sections B, D, F, G, H, I, L, N, O, and R of this contract, in accordance with the principles of Albanian contract law regarding specifically approved clauses."],
+    ["T) Deklaratë Përgjegjësie","Qiramarrësi dhe shoferi deklarojnë se janë plotësisht të vetëdijshëm që, në rast se automjeti nuk kthehet brenda afatit kontraktual dhe në mungesë të një arsye të vlefshme pengesë (rrethana jashtë kontrollit), ata do të mbajnë përgjegjësi për përvetësim të paligjshëm ose, në rastin më të keq, mashtrim kontraktual.",
+     "T) Liability Declaration. The renter and driver declare to be fully aware that, in the event the vehicle is not returned within the contractual time limit and in the absence of any valid preventing reason (circumstances beyond one's control), they will be held responsible for unlawful appropriation or, at worst, contractual fraud."]
   ];
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Kontratë Qeraje ${contractNo}</title>
@@ -478,11 +498,12 @@ function buildContractHTML(c, cars, stage) {
     .sig .ts{font-size:10px;color:#64748b;margin-top:3px}
     .photos{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
     .photos img{width:92px;height:70px;object-fit:cover;border-radius:5px;border:1px solid #e2e8f0}
-    .terms{font-size:10.5px;color:#374151;line-height:1.7}
-    .terms ol{padding-left:16px;margin:4px 0}
-    .terms li{margin-bottom:6px}
+    .terms{font-size:10.2px;color:#374151;line-height:1.65}
+    .terms .clause{margin-bottom:9px;page-break-inside:avoid}
+    .terms .ttl{font-weight:700;color:#0f172a;display:block;margin-bottom:2px}
     .terms .en{color:#64748b;font-style:italic}
     .sub{font-weight:400;color:#64748b}
+    .page-break{page-break-before:always}
     @media print{body{padding:8px}}
   </style></head><body>
 
@@ -493,6 +514,7 @@ function buildContractHTML(c, cars, stage) {
     </div>
     <div class="no">
       Nr. Kontrate / Contract No: <strong>${contractNo}</strong><br/>
+      Rezervimi / Reservation: ${c.reservation_id?c.reservation_id.toString().slice(0,8).toUpperCase():""}<br/>
       Gjeneruar / Generated: ${nowStr()}<br/>
       ${companyName}
     </div>
@@ -500,30 +522,61 @@ function buildContractHTML(c, cars, stage) {
 
   <h3>👤 Të Dhënat e Klientit <span class="sub">/ Renter Information</span></h3>
   <table>
-    <tr><th>Emri i Plotë / Full Name</th><td>${c.client_name||""}</td></tr>
-    <tr><th>Telefoni / Phone</th><td>${c.client_phone||""}</td></tr>
-    <tr><th>Adresa / Address</th><td>${c.client_address||""}</td></tr>
-    <tr><th>Datëlindja / Date of Birth</th><td>${c.client_dob?fmtFull(c.client_dob):""}</td></tr>
-    <tr><th>Nr. Patentë/ID / License-ID No.</th><td>${c.license_number||c.client_id_card||""}</td></tr>
-    <tr><th>Vendi i Lëshimit / Place of Issue</th><td>${c.license_issue||""}</td></tr>
-    <tr><th>Skadimi i Patentës / License Expiry</th><td>${c.license_expiry?fmtFull(c.license_expiry):""}</td></tr>
+    ${row("Emri i Plotë / Full Name", c.client_name)}
+    ${row("Telefoni / Phone", c.client_phone)}
+    ${row("Email", c.client_email)}
+    ${row("Adresa / Address", c.client_address)}
+    ${row("Qyteti / City", c.client_city)}
+    ${row("Vendlindja / Place of Birth", c.client_pob)}
+    ${row("Datëlindja / Date of Birth", c.client_dob?fmtFull(c.client_dob):"")}
+    ${row("Nr. Patentë/ID / License-ID No.", c.license_number||c.client_id_card)}
+    ${row("Vendi i Lëshimit / Place of Issue", c.license_issue)}
+    ${row("Data e Lëshimit / Date of Issue", c.license_date_issue?fmtFull(c.license_date_issue):"")}
+    ${row("Skadimi i Patentës / License Expiry", c.license_expiry?fmtFull(c.license_expiry):"")}
   </table>
 
-  <h3>🚗 Automjeti & Çmimi <span class="sub">/ Vehicle &amp; Pricing</span></h3>
+  <h3>🚗 Automjeti <span class="sub">/ Vehicle</span></h3>
   <table>
-    <tr><th>Makina / Vehicle</th><td>${carLbl} ${carObj?.model?("· "+carObj.model):""}</td></tr>
-    <tr><th>Çmimi Total / Total Price</th><td>${c.total_price?fmtM(c.total_price,c.currency):""}</td></tr>
-    <tr><th>Depozitë Garancie / Security Deposit</th><td>${c.deposit_amount?fmtM(c.deposit_amount,c.currency):""}</td></tr>
-    <tr><th>Karta e Garancisë / Guarantee Card</th><td>${c.card_holder||""} ${c.card_type||""} ${c.card_last4?("****"+c.card_last4):""}</td></tr>
+    ${row("Makina / Model", carLbl+(carObj?.model?(" · "+carObj.model):""))}
+    ${row("Kategoria / Category", c.vehicle_category)}
+    ${row("Nr. Maksimal Pasagjerësh / Max People", c.vehicle_max_people)}
   </table>
+
+  <h3>💶 Çmimi <span class="sub">/ Pricing</span></h3>
+  <table>
+    ${row("Çmimi Total i Qerasë / Rental Total", c.total_price?fmtM(c.total_price,c.currency):"")}
+    ${row("Detaje Tarifash Shtesë / Extra Charges Detail", c.extra_charges_note)}
+    ${row("Shuma e Paguar / Amount Paid", c.total_paid!=null?fmtM(c.total_paid,c.currency):"")}
+    ${row("Mbetet për t'u Paguar / To Be Paid", toBePaid!=null?fmtM(toBePaid,c.currency):"")}
+    ${row("Mënyra e Pagesës / Payment Method", c.payment_method)}
+  </table>
+
+  <h3>🔒 Depozita & Zbritjet <span class="sub">/ Deposit &amp; Deductibles</span></h3>
+  <table>
+    ${row("Depozitë Garancie / Security Deposit", c.deposit_amount?fmtM(c.deposit_amount,c.currency):"")}
+    ${row("Mënyra e Depozitës / Deposit Method", c.deposit_payment_method)}
+    ${row("Zbritje Vjedhje/Zjarr / Theft-Fire Deductible", c.theft_deductible?fmtM(c.theft_deductible,c.currency):"")}
+    ${row("Zbritje Dëmtimesh / Damage Deductible", c.damage_deductible?fmtM(c.damage_deductible,c.currency):"")}
+    ${row("Zbritje Palë e Tretë / Third-Party Deductible", c.third_party_deductible?fmtM(c.third_party_deductible,c.currency):"")}
+  </table>
+
+  <h3>💳 Karta e Garancisë <span class="sub">/ Guarantee Card</span></h3>
+  <table>
+    ${row("Mbajtësi / Holder", c.card_holder)}
+    ${row("Lloji / Type", c.card_type)}
+    ${row("Numri / Number", c.card_last4?("**** **** **** "+c.card_last4):"")}
+    ${row("Skadimi / Expiry", c.card_expiry)}
+  </table>
+  <p style="font-size:10px;color:#64748b">Klienti autorizon qiradhënësin të tarifojë kartën e mësipërme për çdo kosto të lidhur me qeranë (karburant, dëmtime, gjoba, pastrim ekstra). / The customer authorizes the lessor to charge the above card for any cost related to the rental (fuel, damage, fines, extra cleaning).</p>
 
   <h3>🚗 Marrja e Makinës <span class="sub">/ Pickup</span></h3>
   <table>
-    <tr><th>Vendndodhja / Location</th><td>${c.pickup_location||""}</td></tr>
-    <tr><th>Data/Ora / Date-Time</th><td>${c.pickup_datetime?fmtDT(c.pickup_datetime):""}</td></tr>
-    <tr><th>Karburanti / Fuel Level</th><td>${c.pickup_fuel||""}</td></tr>
-    <tr><th>Km</th><td>${c.pickup_km||""}</td></tr>
-    <tr><th>Dëmtime / Damage (OUT)</th><td>${dmgList(c.pickup_damage)}</td></tr>
+    ${row("Vendndodhja / Location", c.pickup_location)}
+    ${row("Data/Ora / Date-Time", c.pickup_datetime?fmtDT(c.pickup_datetime):"")}
+    ${row("Karburanti / Fuel Level", c.pickup_fuel)}
+    ${row("Km", c.pickup_km)}
+    ${row("Dëmtime (diagram) / Damage (diagram)", dmgList(c.pickup_damage))}
+    ${row("Përshkrim Dëmtimesh / Damage Description", c.pickup_damage_notes)}
   </table>
   ${photosGrid(c.pickup_photos)}
   ${c.pickup_signature?`<div class="sig"><div style="font-size:10px;color:#94a3b8;text-transform:uppercase">Nënshkrimi i klientit / Renter's Signature (Pickup)</div><img src="${c.pickup_signature}"/><div class="ts">${c.pickup_signed_at?fmtDT(c.pickup_signed_at):""}</div></div>`:""}
@@ -531,21 +584,21 @@ function buildContractHTML(c, cars, stage) {
   ${showDropoff?`
   <h3>🏁 Kthimi i Makinës <span class="sub">/ Drop-off</span></h3>
   <table>
-    <tr><th>Vendndodhja / Location</th><td>${c.dropoff_location||""}</td></tr>
-    <tr><th>Data/Ora / Date-Time</th><td>${c.dropoff_datetime?fmtDT(c.dropoff_datetime):""}</td></tr>
-    <tr><th>Karburanti / Fuel Level</th><td>${c.dropoff_fuel||""}</td></tr>
-    <tr><th>Km</th><td>${c.dropoff_km||""}</td></tr>
-    <tr><th>Dëmtime / Damage (IN)</th><td>${dmgList(c.dropoff_damage)}</td></tr>
+    ${row("Vendndodhja / Location", c.dropoff_location)}
+    ${row("Data/Ora / Date-Time", c.dropoff_datetime?fmtDT(c.dropoff_datetime):"")}
+    ${row("Karburanti / Fuel Level", c.dropoff_fuel)}
+    ${row("Km", c.dropoff_km)}
+    ${row("Dëmtime (diagram) / Damage (diagram)", dmgList(c.dropoff_damage))}
+    ${row("Përshkrim Dëmtimesh / Damage Description", c.dropoff_damage_notes)}
   </table>
   ${photosGrid(c.dropoff_photos)}
   ${c.dropoff_signature?`<div class="sig"><div style="font-size:10px;color:#94a3b8;text-transform:uppercase">Nënshkrimi i klientit / Renter's Signature (Drop-off)</div><img src="${c.dropoff_signature}"/><div class="ts">${c.dropoff_signed_at?fmtDT(c.dropoff_signed_at):""}</div></div>`:""}
   `:""}
 
+  <div class="page-break"></div>
   <h3>📋 Kushtet e Përgjithshme <span class="sub">/ General Terms &amp; Conditions</span></h3>
   <div class="terms">
-    <ol>
-      ${TERMS_AL.map((t,i)=>`<li>${t}<br/><span class="en">${TERMS_EN[i]}</span></li>`).join("")}
-    </ol>
+    ${TERMS.map(t=>`<div class="clause"><span class="ttl">${t[0]}</span>${t[1]}<br/><span class="en">${t[2]}</span></div>`).join("")}
   </div>
 
   <p style="margin-top:16px;font-size:10.5px;color:#64748b">
@@ -560,6 +613,7 @@ function printContract(c, cars, stage) {
   if (w) { w.document.write(html); w.document.close(); setTimeout(()=>w.print(), 500); }
 }
 
+
 // ─── FAQJA E PLOTË E KONTRATËS (jo modal — faqe më vete) ──────────────────
 function ContractEditor({r, sess, cars, addLog, onBack}) {
   const mob = useMobile();
@@ -570,13 +624,18 @@ function ContractEditor({r, sess, cars, addLog, onBack}) {
 
   const [f,setF] = useState({
     client_name:r.client_name||"", client_phone:r.client_phone||"", client_id_card:r.client_id_card||"",
-    client_address:"", client_dob:"", license_number:"", license_issue:"", license_expiry:"",
-    total_price:r.total_price||"", currency:r.currency||"ALL", deposit_amount:"",
+    client_email:"", client_address:"", client_city:"", client_pob:"", client_dob:"",
+    license_number:"", license_issue:"", license_date_issue:"", license_expiry:"",
+    vehicle_category:"", vehicle_max_people:"",
+    total_price:r.total_price||"", currency:r.currency||"ALL", extra_charges_note:"",
+    total_paid:r.amount_paid||"", payment_method:"",
+    deposit_amount:"", deposit_payment_method:"",
+    theft_deductible:"", damage_deductible:"", third_party_deductible:"",
     card_holder:"", card_last4:"", card_type:"", card_expiry:"",
     pickup_location:"", pickup_datetime:new Date().toISOString().slice(0,16),
-    pickup_fuel:"8/8 (100%)", pickup_km:r.km_out||"", pickup_damage:[], pickup_signature:"", pickup_photos:[],
+    pickup_fuel:"8/8 (100%)", pickup_km:r.km_out||"", pickup_damage:[], pickup_damage_notes:"", pickup_signature:"", pickup_photos:[],
     dropoff_location:"", dropoff_datetime:new Date().toISOString().slice(0,16),
-    dropoff_fuel:"8/8 (100%)", dropoff_km:r.km_in||"", dropoff_damage:[], dropoff_signature:"", dropoff_photos:[],
+    dropoff_fuel:"8/8 (100%)", dropoff_km:r.km_in||"", dropoff_damage:[], dropoff_damage_notes:"", dropoff_signature:"", dropoff_photos:[],
   });
 
   useEffect(()=>{
@@ -594,7 +653,7 @@ function ContractEditor({r, sess, cars, addLog, onBack}) {
 
   function upd(k,v){ setF(x=>({...x,[k]:v})); }
   function sanitizeNum(body){
-    const numFields=["total_price","deposit_amount","pickup_km","dropoff_km"];
+    const numFields=["total_price","deposit_amount","pickup_km","dropoff_km","total_paid","theft_deductible","damage_deductible","third_party_deductible"];
     const out={...body};
     numFields.forEach(k=>{
       if(out[k]==="" || out[k]===undefined) out[k]=null;
@@ -669,23 +728,55 @@ function ContractEditor({r, sess, cars, addLog, onBack}) {
         <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:10}}>
           <Fld label="Emri i Klientit *"><input value={f.client_name} onChange={e=>upd("client_name",e.target.value)} style={FL}/></Fld>
           <Fld label="Telefoni"><input value={f.client_phone} onChange={e=>upd("client_phone",e.target.value)} style={FL}/></Fld>
-          <Fld label="Adresa" col2><input value={f.client_address} onChange={e=>upd("client_address",e.target.value)} style={FL}/></Fld>
+          <Fld label="Email"><input value={f.client_email} onChange={e=>upd("client_email",e.target.value)} style={FL} placeholder="email@..."/></Fld>
+          <Fld label="Adresa"><input value={f.client_address} onChange={e=>upd("client_address",e.target.value)} style={FL}/></Fld>
+          <Fld label="Qyteti"><input value={f.client_city} onChange={e=>upd("client_city",e.target.value)} style={FL}/></Fld>
+          <Fld label="Vendlindja"><input value={f.client_pob} onChange={e=>upd("client_pob",e.target.value)} style={FL}/></Fld>
           <Fld label="Datëlindja"><DateInput value={f.client_dob} onChange={v=>upd("client_dob",v)}/></Fld>
           <Fld label="Nr. Patentë / ID"><input value={f.license_number} onChange={e=>upd("license_number",e.target.value)} style={FL}/></Fld>
           <Fld label="Vendi i Lëshimit"><input value={f.license_issue} onChange={e=>upd("license_issue",e.target.value)} style={FL}/></Fld>
+          <Fld label="Data e Lëshimit"><DateInput value={f.license_date_issue} onChange={v=>upd("license_date_issue",v)}/></Fld>
           <Fld label="Skadimi i Patentës"><DateInput value={f.license_expiry} onChange={v=>upd("license_expiry",v)}/></Fld>
         </div>
       </div>
 
       <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:16,marginBottom:14}}>
-        <h4 style={{margin:"0 0 10px",fontSize:13,color:"#0f172a"}}>💶 Çmimi & Garancia</h4>
+        <h4 style={{margin:"0 0 10px",fontSize:13,color:"#0f172a"}}>🚗 Automjeti</h4>
         <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:10}}>
-          <Fld label="Çmimi Total"><input type="number" value={f.total_price} onChange={e=>upd("total_price",e.target.value)} style={FL}/></Fld>
+          <Fld label="Kategoria"><input value={f.vehicle_category} onChange={e=>upd("vehicle_category",e.target.value)} style={FL} placeholder="p.sh. Kompakte, SUV, Ekonomike"/></Fld>
+          <Fld label="Nr. Maksimal Pasagjerësh"><input value={f.vehicle_max_people} onChange={e=>upd("vehicle_max_people",e.target.value)} style={FL} placeholder="5"/></Fld>
+        </div>
+      </div>
+
+      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:16,marginBottom:14}}>
+        <h4 style={{margin:"0 0 10px",fontSize:13,color:"#0f172a"}}>💶 Çmimi</h4>
+        <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:10}}>
+          <Fld label="Çmimi Total i Qerasë"><input type="number" value={f.total_price} onChange={e=>upd("total_price",e.target.value)} style={FL}/></Fld>
           <Fld label="Monedha"><select value={f.currency} onChange={e=>upd("currency",e.target.value)} style={FL}><option value="ALL">Lekë</option><option value="EUR">Euro</option></select></Fld>
+          <Fld label="Shuma e Paguar"><input type="number" value={f.total_paid} onChange={e=>upd("total_paid",e.target.value)} style={FL}/></Fld>
+          <Fld label="Mënyra e Pagesës"><input value={f.payment_method} onChange={e=>upd("payment_method",e.target.value)} style={FL} placeholder="Cash / Kartë / Transfertë"/></Fld>
+          <Fld label="Detaje Tarifash Shtesë (karburant, km shtesë, kohë shtesë, pastrim...)" col2><textarea value={f.extra_charges_note} onChange={e=>upd("extra_charges_note",e.target.value)} style={{...FL,height:50,resize:"vertical"}}/></Fld>
+        </div>
+      </div>
+
+      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:16,marginBottom:14}}>
+        <h4 style={{margin:"0 0 10px",fontSize:13,color:"#0f172a"}}>🔒 Depozita & Zbritjet</h4>
+        <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:10}}>
           <Fld label="Depozitë Garancie"><input type="number" value={f.deposit_amount} onChange={e=>upd("deposit_amount",e.target.value)} style={FL}/></Fld>
+          <Fld label="Mënyra e Depozitës"><input value={f.deposit_payment_method} onChange={e=>upd("deposit_payment_method",e.target.value)} style={FL} placeholder="Kartë Krediti / Cash"/></Fld>
+          <Fld label="Zbritje Vjedhje/Zjarr"><input type="number" value={f.theft_deductible} onChange={e=>upd("theft_deductible",e.target.value)} style={FL}/></Fld>
+          <Fld label="Zbritje Dëmtimesh"><input type="number" value={f.damage_deductible} onChange={e=>upd("damage_deductible",e.target.value)} style={FL}/></Fld>
+          <Fld label="Zbritje Palë e Tretë"><input type="number" value={f.third_party_deductible} onChange={e=>upd("third_party_deductible",e.target.value)} style={FL}/></Fld>
+        </div>
+      </div>
+
+      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:16,marginBottom:14}}>
+        <h4 style={{margin:"0 0 10px",fontSize:13,color:"#0f172a"}}>💳 Karta e Garancisë</h4>
+        <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:10}}>
           <Fld label="Mbajtësi i Kartës"><input value={f.card_holder} onChange={e=>upd("card_holder",e.target.value)} style={FL} placeholder="Emri Mbiemri"/></Fld>
           <Fld label="Lloji i Kartës"><input value={f.card_type} onChange={e=>upd("card_type",e.target.value)} style={FL} placeholder="Visa / Mastercard"/></Fld>
           <Fld label="4 Shifrat e Fundit të Kartës"><input value={f.card_last4} onChange={e=>upd("card_last4",e.target.value.replace(/\D/g,"").slice(0,4))} style={FL} maxLength={4} placeholder="7189"/></Fld>
+          <Fld label="Skadimi i Kartës"><input value={f.card_expiry} onChange={e=>upd("card_expiry",e.target.value)} style={FL} placeholder="MM/YYYY"/></Fld>
         </div>
       </div>
 
@@ -699,6 +790,8 @@ function ContractEditor({r, sess, cars, addLog, onBack}) {
           </div>
           <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:6}}>Diagrami i Dëmtimeve (OUT)</label>
           <CarDamageDiagram points={f.pickup_damage} onChange={v=>upd("pickup_damage",v)}/>
+          <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",margin:"12px 0 6px"}}>Përshkrim me Tekst i Dëmtimeve</label>
+          <textarea value={f.pickup_damage_notes} onChange={e=>upd("pickup_damage_notes",e.target.value)} style={{...FL,height:50,resize:"vertical"}} placeholder="p.sh. Gërvishtje shumëfishe, ulëse shoferi..."/>
           <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",margin:"14px 0 6px"}}>📷 Foto të Gjendjes / Dëmtimeve</label>
           <PhotoUploader photos={f.pickup_photos} onChange={v=>upd("pickup_photos",v)} uploadFn={uploadPickupPhoto}/>
           <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",margin:"14px 0 6px"}}>Nënshkrimi i Klientit *</label>
@@ -714,6 +807,8 @@ function ContractEditor({r, sess, cars, addLog, onBack}) {
           </div>
           <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:6}}>Diagrami i Dëmtimeve (IN)</label>
           <CarDamageDiagram points={f.dropoff_damage} onChange={v=>upd("dropoff_damage",v)}/>
+          <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",margin:"12px 0 6px"}}>Përshkrim me Tekst i Dëmtimeve</label>
+          <textarea value={f.dropoff_damage_notes} onChange={e=>upd("dropoff_damage_notes",e.target.value)} style={{...FL,height:50,resize:"vertical"}} placeholder="p.sh. Gërvishtje shumëfishe, ulëse shoferi..."/>
           <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",margin:"14px 0 6px"}}>📷 Foto të Gjendjes / Dëmtimeve</label>
           <PhotoUploader photos={f.dropoff_photos} onChange={v=>upd("dropoff_photos",v)} uploadFn={uploadDropoffPhoto}/>
           <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",margin:"14px 0 6px"}}>Nënshkrimi i Klientit *</label>
