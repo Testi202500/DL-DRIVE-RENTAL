@@ -470,10 +470,21 @@ function ContractModal({r, sess, cars, addLog, onClose}) {
 
   function upd(k,v){ setF(x=>({...x,[k]:v})); }
 
+  // Kolonat numerike ne Supabase (numeric) nuk pranojne "" — duhet null
+  function sanitizeNum(body){
+    const numFields=["total_price","deposit_amount","pickup_km","dropoff_km"];
+    const out={...body};
+    numFields.forEach(k=>{
+      if(out[k]==="" || out[k]===undefined) out[k]=null;
+      else if(out[k]!==null) out[k]=Number(out[k]);
+    });
+    return out;
+  }
+
   async function saveDraft(){
     setSaving(true);
     try {
-      const body = {...f, reservation_id:r.id, car_name:r.car_name, created_by:sess.profile?.username, status:existing?.status||"draft"};
+      const body = sanitizeNum({...f, reservation_id:r.id, car_name:r.car_name, created_by:sess.profile?.username, status:existing?.status||"draft"});
       if(existing){
         const [u]=await sbAuthPatch("rental_contracts",existing.id,body,sess.token);
         setExisting(u);
@@ -490,7 +501,7 @@ function ContractModal({r, sess, cars, addLog, onClose}) {
     if(!f.pickup_location||!f.pickup_km){ alert("Plotëso vendndodhjen dhe km."); return; }
     setSaving(true);
     try {
-      const body = {...f, reservation_id:r.id, car_name:r.car_name, created_by:sess.profile?.username, status:"pickup_done", pickup_signed_at:new Date().toISOString()};
+      const body = sanitizeNum({...f, reservation_id:r.id, car_name:r.car_name, created_by:sess.profile?.username, status:"pickup_done", pickup_signed_at:new Date().toISOString()});
       let saved;
       if(existing){ [saved]=await sbAuthPatch("rental_contracts",existing.id,body,sess.token); }
       else { [saved]=await sbAuthPost("rental_contracts",body,sess.token); }
@@ -507,7 +518,7 @@ function ContractModal({r, sess, cars, addLog, onClose}) {
     if(!f.dropoff_location||!f.dropoff_km){ alert("Plotëso vendndodhjen dhe km."); return; }
     setSaving(true);
     try {
-      const body = {...f, status:"completed", dropoff_signed_at:new Date().toISOString()};
+      const body = sanitizeNum({...f, status:"completed", dropoff_signed_at:new Date().toISOString()});
       const [saved]=await sbAuthPatch("rental_contracts",existing.id,body,sess.token);
       setExisting(saved);
       addLog&&addLog("Kontratë Dropoff",r.car_name+" - "+r.client_name);
