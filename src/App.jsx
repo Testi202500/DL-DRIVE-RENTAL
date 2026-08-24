@@ -424,6 +424,37 @@ function PhotoUploader({photos,onChange,uploadFn,label}) {
   );
 }
 
+// ─── OPSIONET E SIGURIMIT (Neni 3 i kontratës) ────────────────────────────
+const INSURANCE_OPTIONS = {
+  baze: {
+    label: "Sigurim Bazë (i përfshirë)",
+    labelEn: "Basic Insurance (included)",
+    fee: 0,
+    coversAl: "Dëme ndaj palëve të treta (nëse klienti godet një makinë tjetër).",
+    notCoversAl: "Dëme në makinën e marrë me qera; gërvishtje, aksidente, dëmtime; vjedhje; përdorim i gabuar.",
+    coversEn: "Damage to third parties (if the client hits another vehicle).",
+    notCoversEn: "Damage to the rented vehicle itself; scratches, accidents, damage; theft; improper use."
+  },
+  pjesshem: {
+    label: "Sigurim i Pjesshëm (+10€/ditë)",
+    labelEn: "Partial Insurance (+€10/day)",
+    fee: 10,
+    coversAl: "Dëmtime të kufizuara në makinë nga aksidente të lehta dhe gërvishtje/dëmtime të jashtme. Qiramarrësi mban përgjegjësi deri në shumën e excess-it të specifikuar.",
+    notCoversAl: "Drejtim nën ndikimin e alkoolit/drogës; shkelje të rregullave të qarkullimit; përdorim i gabuar i makinës; dëmtime nga pakujdesi ekstreme; humbje çelësash; dëmtime në brendësi; dëme te goma, disqe, xhama.",
+    coversEn: "Limited vehicle damage from light accidents and external scratches/damage. The renter remains liable up to the specified excess amount.",
+    notCoversEn: "Driving under alcohol/drug influence; traffic rule violations; improper vehicle use; damage from extreme negligence; lost keys; interior damage; tire, wheel, or glass damage."
+  },
+  plote: {
+    label: "Sigurim i Plotë (+20€/ditë)",
+    labelEn: "Full Insurance (+€20/day)",
+    fee: 20,
+    coversAl: "Shumica e dëmtimeve të automjetit gjatë qerasë (aksidente, përplasje, gërvishtje), duke reduktuar përgjegjësinë financiare të qiramarrësit në minimum ose zero.",
+    notCoversAl: "Dëme nga neglizhenca e rëndë, drejtim nën ndikim alkooli/substancash, shkelje të rregullave të qarkullimit, humbje çelësash, dëmtime në brendësi të automjetit.",
+    coversEn: "Most vehicle damage during the rental (accidents, collisions, scratches), reducing the renter's financial liability to a minimum or zero.",
+    notCoversEn: "Damage from gross negligence, driving under alcohol/substance influence, traffic rule violations, lost keys, interior vehicle damage."
+  }
+};
+
 // ─── GJENERIMI I PDF-SË SË KONTRATËS — dygjuhëshe (Shqip / English) ───────
 function buildContractHTML(c, cars, stage) {
   const carObj = cars.find(x=>x.name===c.car_name);
@@ -515,6 +546,9 @@ function buildContractHTML(c, cars, stage) {
     .sig-block .line{border-top:1px solid #94a3b8;margin-top:44px;padding-top:4px}
     .sig-block .who{font-size:10px;font-weight:700;color:#0f172a}
     .sig-block .ts{font-size:9px;color:#94a3b8}
+    .stamp-wrap{display:flex;flex-direction:column;align-items:center;gap:2px}
+    .stamp-qr{width:58px;height:58px;border:1px solid #e2e8f0;border-radius:4px;padding:3px;background:#fff}
+    .stamp-badge{display:inline-flex;align-items:center;gap:4px;background:#f0fdf4;border:1.5px solid #16a34a;color:#166534;font-size:9px;font-weight:800;padding:2px 8px;border-radius:20px;margin-top:4px;letter-spacing:0.3px;transform:rotate(-3deg)}
     .photos{display:flex;flex-wrap:wrap;gap:6px;margin:8px 10px}
     .photos img{width:88px;height:66px;object-fit:cover;border-radius:5px;border:1px solid #e2e8f0}
     .terms{font-size:9.3px;color:#334155;line-height:1.55;columns:1}
@@ -591,6 +625,20 @@ function buildContractHTML(c, cars, stage) {
     </div>
   </div>
 
+  ${c.insurance_option?`
+  <div class="section">
+    <div class="section-hd">🛡️ Opsioni i Sigurimit i Zgjedhur <span class="en">/ Selected Insurance Option</span></div>
+    <div class="section-bd" style="padding:8px 12px">
+      <div style="font-weight:800;font-size:12px;color:#0f172a;margin-bottom:4px">${INSURANCE_OPTIONS[c.insurance_option]?.label||""} <span style="font-weight:400;color:#64748b;font-size:10px">/ ${INSURANCE_OPTIONS[c.insurance_option]?.labelEn||""}</span></div>
+      ${c.insurance_option==="pjesshem"&&c.insurance_excess?`<div style="font-size:10.5px;color:#0f172a;margin-bottom:4px"><strong>Excess:</strong> ${fmtM(c.insurance_excess,c.currency)} <span style="color:#64748b;font-style:italic">(shuma maksimale e përgjegjësisë së qiramarrësit për çdo dëm / max renter liability per incident)</span></div>`:""}
+      <div style="font-size:10px;color:#166534;margin-bottom:2px"><strong>✓ Mbulon / Covers:</strong> ${INSURANCE_OPTIONS[c.insurance_option]?.coversAl||""}</div>
+      <div style="font-size:9.5px;color:#166534;font-style:italic;margin-bottom:6px">${INSURANCE_OPTIONS[c.insurance_option]?.coversEn||""}</div>
+      <div style="font-size:10px;color:#991b1b;margin-bottom:2px"><strong>✕ Nuk mbulon / Does not cover:</strong> ${INSURANCE_OPTIONS[c.insurance_option]?.notCoversAl||""}</div>
+      <div style="font-size:9.5px;color:#991b1b;font-style:italic">${INSURANCE_OPTIONS[c.insurance_option]?.notCoversEn||""}</div>
+    </div>
+  </div>
+  `:""}
+
   <div class="section">
     <div class="section-hd">🚗 Marrja e Makinës <span class="en">/ Pickup</span></div>
     <div class="section-bd">
@@ -633,9 +681,12 @@ function buildContractHTML(c, cars, stage) {
       <div class="ts">${c.dropoff_signed_at?("Kthim / Drop-off: "+fmtDT(c.dropoff_signed_at)):""}</div>
     </div>
     <div class="box">
-      <div class="line"></div>
+      <div class="stamp-wrap">
+        <img class="stamp-qr" src="https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent((companyName||"")+" | Kontratë Nr. "+contractNo)}"/>
+        <div class="stamp-badge">✓ AUTORIZUAR / AUTHORIZED</div>
+      </div>
       <div class="who">${companyName}</div>
-      <div class="ts">${c.created_by?("Agjenti / Agent: "+c.created_by):""}</div>
+      <div class="ts">Nr. ${contractNo}${c.created_by?(" · "+c.created_by):""}</div>
     </div>
   </div>
 
@@ -681,6 +732,7 @@ function ContractEditor({r, sess, cars, addLog, onBack}) {
     total_paid:r.amount_paid||"", payment_method:"",
     deposit_amount:"", deposit_payment_method:"",
     theft_deductible:"", damage_deductible:"", third_party_deductible:"",
+    insurance_option:"baze", insurance_excess:"400",
     card_holder:"", card_last4:"", card_type:"", card_expiry:"",
     pickup_location:"", pickup_datetime:new Date().toISOString().slice(0,16),
     pickup_fuel:"8/8 (100%)", pickup_km:r.km_out||"", pickup_damage:[], pickup_damage_notes:"", pickup_signature:"", pickup_photos:[],
@@ -714,7 +766,7 @@ function ContractEditor({r, sess, cars, addLog, onBack}) {
 
   function upd(k,v){ setF(x=>({...x,[k]:v})); }
   function sanitizeNum(body){
-    const numFields=["total_price","deposit_amount","pickup_km","dropoff_km","total_paid","theft_deductible","damage_deductible","third_party_deductible"];
+    const numFields=["total_price","deposit_amount","pickup_km","dropoff_km","total_paid","theft_deductible","damage_deductible","third_party_deductible","insurance_excess"];
     const out={...body};
     numFields.forEach(k=>{
       if(out[k]==="" || out[k]===undefined) out[k]=null;
@@ -826,6 +878,32 @@ function ContractEditor({r, sess, cars, addLog, onBack}) {
           <Fld label="Mënyra e Pagesës"><input value={f.payment_method} onChange={e=>upd("payment_method",e.target.value)} style={FL} placeholder="Cash / Kartë / Transfertë"/></Fld>
           <Fld label="Detaje Tarifash Shtesë (karburant, km shtesë, kohë shtesë, pastrim...)" col2><textarea value={f.extra_charges_note} onChange={e=>upd("extra_charges_note",e.target.value)} style={{...FL,height:50,resize:"vertical"}}/></Fld>
         </div>
+      </div>
+
+      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:16,marginBottom:14}}>
+        <h4 style={{margin:"0 0 10px",fontSize:13,color:"#0f172a"}}>🛡️ Opsioni i Sigurimit (Neni 3)</h4>
+        <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr 1fr",gap:8,marginBottom:12}}>
+          {Object.entries(INSURANCE_OPTIONS).map(([key,opt])=>(
+            <button key={key} type="button" onClick={()=>upd("insurance_option",key)} style={{
+              textAlign:"left",padding:"10px 12px",borderRadius:10,cursor:"pointer",
+              border:"2px solid "+(f.insurance_option===key?"#1d4ed8":"#e2e8f0"),
+              background:f.insurance_option===key?"#eff6ff":"#fff",
+            }}>
+              <div style={{fontSize:12,fontWeight:800,color:f.insurance_option===key?"#1d4ed8":"#0f172a"}}>{opt.label}</div>
+            </button>
+          ))}
+        </div>
+        <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 12px",fontSize:11.5,lineHeight:1.6}}>
+          <div style={{color:"#166534",marginBottom:4}}><strong>✓ Mbulon:</strong> {INSURANCE_OPTIONS[f.insurance_option]?.coversAl}</div>
+          <div style={{color:"#991b1b"}}><strong>✕ Nuk mbulon:</strong> {INSURANCE_OPTIONS[f.insurance_option]?.notCoversAl}</div>
+        </div>
+        {f.insurance_option==="pjesshem"&&(
+          <div style={{marginTop:10}}>
+            <Fld label="Excess (shuma maksimale e përgjegjësisë së klientit për dëm, €)">
+              <input type="number" value={f.insurance_excess} onChange={e=>upd("insurance_excess",e.target.value)} style={FL} placeholder="400"/>
+            </Fld>
+          </div>
+        )}
       </div>
 
       <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:16,marginBottom:14}}>
