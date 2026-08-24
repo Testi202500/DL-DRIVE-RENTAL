@@ -547,8 +547,12 @@ function buildContractHTML(c, cars, stage) {
     .sig-block .who{font-size:10px;font-weight:700;color:#0f172a}
     .sig-block .ts{font-size:9px;color:#94a3b8}
     .stamp-wrap{display:flex;flex-direction:column;align-items:center;gap:2px}
-    .stamp-qr{width:58px;height:58px;border:1px solid #e2e8f0;border-radius:4px;padding:3px;background:#fff}
-    .stamp-badge{display:inline-flex;align-items:center;gap:4px;background:#f0fdf4;border:1.5px solid #16a34a;color:#166534;font-size:9px;font-weight:800;padding:2px 8px;border-radius:20px;margin-top:4px;letter-spacing:0.3px;transform:rotate(-3deg)}
+    .stamp-row{display:flex;align-items:center;justify-content:center;gap:12px}
+    .stamp-qr{width:56px;height:56px;border:1px solid #e2e8f0;border-radius:4px;padding:3px;background:#fff}
+    .stamp-official{width:76px;height:76px;border-radius:50%;border:2.5px solid #0f172a;outline:1px solid #0f172a;outline-offset:3px;display:flex;flex-direction:column;align-items:center;justify-content:center;transform:rotate(-9deg);color:#0f172a;background:rgba(15,23,42,0.02)}
+    .stamp-official .tick{font-size:19px;font-weight:900;line-height:1}
+    .stamp-official .txt1{font-size:6.3px;font-weight:800;letter-spacing:0.6px;text-transform:uppercase;margin-top:3px}
+    .stamp-official .txt2{font-size:5.3px;color:#475569;letter-spacing:0.6px;margin-top:1px}
     .photos{display:flex;flex-wrap:wrap;gap:6px;margin:8px 10px}
     .photos img{width:88px;height:66px;object-fit:cover;border-radius:5px;border:1px solid #e2e8f0}
     .terms{font-size:9.3px;color:#334155;line-height:1.55;columns:1}
@@ -630,7 +634,7 @@ function buildContractHTML(c, cars, stage) {
     <div class="section-hd">🛡️ Opsioni i Sigurimit i Zgjedhur <span class="en">/ Selected Insurance Option</span></div>
     <div class="section-bd" style="padding:8px 12px">
       <div style="font-weight:800;font-size:12px;color:#0f172a;margin-bottom:4px">${INSURANCE_OPTIONS[c.insurance_option]?.label||""} <span style="font-weight:400;color:#64748b;font-size:10px">/ ${INSURANCE_OPTIONS[c.insurance_option]?.labelEn||""}</span></div>
-      ${c.insurance_option==="pjesshem"&&c.insurance_excess?`<div style="font-size:10.5px;color:#0f172a;margin-bottom:4px"><strong>Excess:</strong> ${fmtM(c.insurance_excess,c.currency)} <span style="color:#64748b;font-style:italic">(shuma maksimale e përgjegjësisë së qiramarrësit për çdo dëm / max renter liability per incident)</span></div>`:""}
+      ${c.insurance_option==="pjesshem"&&c.insurance_excess?`<div style="font-size:10.5px;color:#0f172a;margin-bottom:4px"><strong>Excess (detyrimi i klientit për çdo dëm):</strong> €${Number(c.insurance_excess).toFixed(2)} <span style="color:#64748b;font-style:italic">— shuma maksimale që qiramarrësi mban përgjegjësi / max renter liability per incident</span></div>`:""}
       <div style="font-size:10px;color:#166534;margin-bottom:2px"><strong>✓ Mbulon / Covers:</strong> ${INSURANCE_OPTIONS[c.insurance_option]?.coversAl||""}</div>
       <div style="font-size:9.5px;color:#166534;font-style:italic;margin-bottom:6px">${INSURANCE_OPTIONS[c.insurance_option]?.coversEn||""}</div>
       <div style="font-size:10px;color:#991b1b;margin-bottom:2px"><strong>✕ Nuk mbulon / Does not cover:</strong> ${INSURANCE_OPTIONS[c.insurance_option]?.notCoversAl||""}</div>
@@ -682,8 +686,14 @@ function buildContractHTML(c, cars, stage) {
     </div>
     <div class="box">
       <div class="stamp-wrap">
-        <img class="stamp-qr" src="https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent((companyName||"")+" | Kontratë Nr. "+contractNo)}"/>
-        <div class="stamp-badge">✓ AUTORIZUAR / AUTHORIZED</div>
+        <div class="stamp-row">
+          <img class="stamp-qr" src="https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent((companyName||"")+" | Kontratë Nr. "+contractNo)}"/>
+          <div class="stamp-official">
+            <div class="tick">✓</div>
+            <div class="txt1">Autorizuar</div>
+            <div class="txt2">Authorized</div>
+          </div>
+        </div>
       </div>
       <div class="who">${companyName}</div>
       <div class="ts">Nr. ${contractNo}${c.created_by?(" · "+c.created_by):""}</div>
