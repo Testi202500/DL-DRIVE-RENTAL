@@ -3986,7 +3986,7 @@ function SrvPage({sess,reload,reloadTick,addLog}) {
   const [srch,setSrch]=useState("");
   const [showSrvF,setShowSrvF]=useState(false);
   const [editSrv,setEditSrv]=useState(null);
-  const [sf,setSf]=useState({car_name:"",type:"sigurim",expiry_date:"",done_date:"",notes:""});
+  const [sf,setSf]=useState({car_name:"",type:"sigurim",expiry_date:"",notes:""});
   const [showOilF,setShowOilF]=useState(false);
   const [oilF,setOilF]=useState({last_oil_km:"",oil_interval_km:"15000",last_oil_date:""});
   const [importingDocs,setImportingDocs]=useState(false);
@@ -4074,7 +4074,7 @@ function SrvPage({sess,reload,reloadTick,addLog}) {
   async function saveSrv(){
     if(!sf.car_name||!sf.expiry_date) { alert("Duhet të zgjedhësh makinën dhe datën."); return; }
     try {
-      const body={...sf,done_date:sf.done_date||null};
+      const body={...sf};
       if(editSrv){
         await sbAuthPatch("car_services",editSrv,body,sess.token);
         addLog("Ndrysho Servis",sf.car_name+" - "+sf.type);
@@ -4083,7 +4083,7 @@ function SrvPage({sess,reload,reloadTick,addLog}) {
         addLog("Shto Servis",sf.car_name+" - "+sf.type);
       }
       reload(); setShowSrvF(false); setEditSrv(null);
-      setSf({car_name:selCar||"",type:"sigurim",expiry_date:"",done_date:"",notes:""});
+      setSf({car_name:selCar||"",type:"sigurim",expiry_date:"",notes:""});
     } catch(e){
       alert("Gabim: "+e.message);
     }
@@ -4246,7 +4246,7 @@ function SrvPage({sess,reload,reloadTick,addLog}) {
         <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,overflow:"hidden"}}>
           <div style={{background:"#0f172a",padding:"12px 16px",display:"flex",alignItems:"center",gap:10}}>
             <span style={{fontWeight:800,fontSize:15,color:"#fff",flex:1}}>{carLabel(selCar,cars)}</span>
-            <button onClick={()=>{setSf({car_name:selCar,type:"sigurim",expiry_date:"",done_date:"",notes:""});setEditSrv(null);setShowSrvF(true)}} style={{...PB,fontSize:12,padding:"6px 12px"}}>+ Dokument</button>
+            <button onClick={()=>{setSf({car_name:selCar,type:"sigurim",expiry_date:"",notes:""});setEditSrv(null);setShowSrvF(true)}} style={{...PB,fontSize:12,padding:"6px 12px"}}>+ Dokument</button>
           </div>
 
           <div style={{padding:16}}>
@@ -4264,7 +4264,7 @@ function SrvPage({sess,reload,reloadTick,addLog}) {
                     {srv?<div style={{fontSize:11,color:"#64748b"}}>Skadon: {fmtFull(srv.expiry_date)}{srv.notes?" · "+srv.notes:""}</div>:<div style={{fontSize:11,color:"#94a3b8"}}>Nuk është shtuar</div>}
                   </div>
                   {srv&&<div style={{padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:700,background:urg.bg,color:urg.tx,border:"1px solid "+urg.bd,flexShrink:0}}>{days<0?"Skaduar":days+"d"}</div>}
-                  <button onClick={()=>{setSf({car_name:selCar,type,expiry_date:srv?.expiry_date||"",done_date:srv?.done_date||"",notes:srv?.notes||""});setEditSrv(srv?.id||null);setShowSrvF(true)}} style={{...IB,fontSize:12}}>{srv?"✏️":"➕"}</button>
+                  <button onClick={()=>{setSf({car_name:selCar,type,expiry_date:srv?.expiry_date||"",notes:srv?.notes||""});setEditSrv(srv?.id||null);setShowSrvF(true)}} style={{...IB,fontSize:12}}>{srv?"✏️":"➕"}</button>
                   {srv&&<button onClick={()=>delSrv(srv.id)} style={{...IB,color:"#dc2626",fontSize:12}}>🗑️</button>}
                 </div>
               );
