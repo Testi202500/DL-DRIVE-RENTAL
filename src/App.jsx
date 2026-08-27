@@ -3517,31 +3517,56 @@ function CarsReport({cars,reses,exps,view}){
 
   if(view==="detail"){
     const sorted=[...reses].sort((a,b)=>(b.date_from||"").localeCompare(a.date_from||""));
+    const sortedExps=[...exps].sort((a,b)=>(b.expense_date||"").localeCompare(a.expense_date||""));
     return (
-      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,overflow:"hidden"}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-          <thead><tr style={{background:"#f8fafc"}}>
-            {["Makina","Klienti","Nga","Deri","Çmimi","Paguar","Detyrim","Status"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:11,color:"#64748b",fontWeight:700,borderBottom:"2px solid #e2e8f0"}}>{h}</th>)}
-          </tr></thead>
-          <tbody>
-            {sorted.map(r=>{
-              const debt=Number(r.total_price||0)-Number(r.amount_paid||0);
-              return (
-                <tr key={r.id} style={{borderBottom:"1px solid #f1f5f9"}}>
-                  <td style={{padding:"7px 10px",fontWeight:700}}>{carLabel(r.car_name,cars)}</td>
-                  <td style={{padding:"7px 10px"}}>{r.client_name}</td>
-                  <td style={{padding:"7px 10px"}}>{fmtFull(r.date_from)}</td>
-                  <td style={{padding:"7px 10px"}}>{fmtFull(r.date_to)}</td>
-                  <td style={{padding:"7px 10px",fontWeight:700}}>{fmtM(r.total_price,r.currency)}</td>
-                  <td style={{padding:"7px 10px",color:"#16a34a"}}>{fmtM(r.amount_paid||0,r.currency)}</td>
-                  <td style={{padding:"7px 10px",color:debt>0.01?"#dc2626":"#94a3b8",fontWeight:debt>0.01?700:400}}>{debt>0.01?fmtM(debt,r.currency):"-"}</td>
-                  <td style={{padding:"7px 10px"}}><Badge s={r.status}/></td>
+      <div>
+        <h4 style={{margin:"0 0 8px",fontSize:13,fontWeight:700,color:"#166534"}}>💰 Të Ardhurat (Rezervimet)</h4>
+        <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,overflow:"hidden",marginBottom:20}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+            <thead><tr style={{background:"#f8fafc"}}>
+              {["Makina","Klienti","Nga","Deri","Çmimi","Paguar","Detyrim","Status"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:11,color:"#64748b",fontWeight:700,borderBottom:"2px solid #e2e8f0"}}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {sorted.map(r=>{
+                const debt=Number(r.total_price||0)-effPaid(r);
+                return (
+                  <tr key={r.id} style={{borderBottom:"1px solid #f1f5f9"}}>
+                    <td style={{padding:"7px 10px",fontWeight:700}}>{carLabel(r.car_name,cars)}</td>
+                    <td style={{padding:"7px 10px"}}>{r.client_name}</td>
+                    <td style={{padding:"7px 10px"}}>{fmtFull(r.date_from)}</td>
+                    <td style={{padding:"7px 10px"}}>{fmtFull(r.date_to)}</td>
+                    <td style={{padding:"7px 10px",fontWeight:700}}>{fmtM(r.total_price,r.currency)}</td>
+                    <td style={{padding:"7px 10px",color:"#16a34a"}}>{fmtM(effPaid(r),r.currency)}</td>
+                    <td style={{padding:"7px 10px",color:debt>0.01?"#dc2626":"#94a3b8",fontWeight:debt>0.01?700:400}}>{debt>0.01?fmtM(debt,r.currency):"-"}</td>
+                    <td style={{padding:"7px 10px"}}><Badge s={r.status}/></td>
+                  </tr>
+                );
+              })}
+              {sorted.length===0&&<tr><td colSpan={8} style={{padding:20,textAlign:"center",color:"#94a3b8"}}>Nuk ka rezervime për këtë filtër.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+
+        <h4 style={{margin:"0 0 8px",fontSize:13,fontWeight:700,color:"#991b1b"}}>📤 Shpenzimet</h4>
+        <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,overflow:"hidden"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+            <thead><tr style={{background:"#f8fafc"}}>
+              {["Data","Makina","Përshkrimi","Kategoria","Shuma"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:11,color:"#64748b",fontWeight:700,borderBottom:"2px solid #e2e8f0"}}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {sortedExps.map(e=>(
+                <tr key={e.id} style={{borderBottom:"1px solid #f1f5f9"}}>
+                  <td style={{padding:"7px 10px"}}>{e.expense_date?fmtFull(e.expense_date):"-"}</td>
+                  <td style={{padding:"7px 10px",fontWeight:700}}>{e.car_name?carLabel(e.car_name,cars):"—"}</td>
+                  <td style={{padding:"7px 10px"}}>{e.description||"-"}</td>
+                  <td style={{padding:"7px 10px",color:"#64748b"}}>{e.category||"-"}</td>
+                  <td style={{padding:"7px 10px",fontWeight:700,color:"#dc2626"}}>{fmtM(e.amount,e.currency)}</td>
                 </tr>
-              );
-            })}
-            {sorted.length===0&&<tr><td colSpan={8} style={{padding:20,textAlign:"center",color:"#94a3b8"}}>Nuk ka rezervime për këtë filtër.</td></tr>}
-          </tbody>
-        </table>
+              ))}
+              {sortedExps.length===0&&<tr><td colSpan={5} style={{padding:20,textAlign:"center",color:"#94a3b8"}}>Nuk ka shpenzime për këtë filtër.</td></tr>}
+            </tbody>
+          </table>
+        </div>
       </div>
     );
   }
