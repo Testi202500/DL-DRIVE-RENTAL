@@ -2008,7 +2008,7 @@ function ResPage({sess,reload,reloadTick,addLog,onOpenContract}) {
   const [detId,setDetId]=useState(null);
   const [filt,setFilt]=useState("all");
   const [srch,setSrch]=useState("");
-  const empty={car_name:"",car_id:"",client_name:"",client_phone:"",client_id_card:"",date_from:"",date_to:"",pickup_time:"10:00",return_time:"10:00",price_per_day:"",currency:"ALL",total_price:"",prepayment:null,prepayment_method:"cash",status:"Konfirmuar",payment_status:"pritje",notes:""};
+  const empty={car_name:"",car_id:"",client_name:"",client_phone:"",client_id_card:"",date_from:"",date_to:"",pickup_time:"10:00",return_time:"10:00",price_per_day:"",currency:"ALL",total_price:"",billing_days:"",prepayment:null,prepayment_method:"cash",status:"Konfirmuar",payment_status:"pritje",notes:""};
   const [form,setForm]=useState(empty);
   const nd=diffDays(form.date_from,form.date_to);
 
@@ -2031,9 +2031,16 @@ function ResPage({sess,reload,reloadTick,addLog,onOpenContract}) {
     ]).then(([r,c,cl])=>{setReses(r);setCars(c);setClients(cl);setLoading(false);}).catch(e=>{setErr(e.message);setLoading(false);});
   },[reloadTick,sess.token]);
 
+  // Kur ndryshojnë datat, rillogarit automatikisht numrin e ditëve për faturim —
+  // por kjo qelizë mbetet e lirë për t'u ndryshuar manualisht pas kësaj (marrëveshje e veçantë me klientin)
   useEffect(()=>{
-    if(form.price_per_day&&nd>0) setForm(f=>({...f,total_price:(Number(f.price_per_day)*nd).toFixed(0)}));
-  },[form.price_per_day,form.date_from,form.date_to]);
+    if(form.date_from&&form.date_to) setForm(f=>({...f,billing_days:diffDays(f.date_from,f.date_to)}));
+  },[form.date_from,form.date_to]);
+
+  useEffect(()=>{
+    const days=Number(form.billing_days)||0;
+    if(form.price_per_day&&days>0) setForm(f=>({...f,total_price:(Number(f.price_per_day)*days).toFixed(0)}));
+  },[form.price_per_day,form.billing_days]);
 
   async function doSave(){
     if(!form.car_name||!form.client_name||!form.total_price){alert("Plotëso fushat e detyrueshme");return;}
@@ -2064,7 +2071,7 @@ function ResPage({sess,reload,reloadTick,addLog,onOpenContract}) {
         return;
       }
       // Nderto body pa fushat qe nuk duhen ne tabele
-      const {prepayment, prepayment_method, ...formRest} = form;
+      const {prepayment, prepayment_method, billing_days, ...formRest} = form;
       const body={
         ...formRest,
         car_id:form.car_id||null,
@@ -2182,7 +2189,7 @@ function ResPage({sess,reload,reloadTick,addLog,onOpenContract}) {
                 )}
                 <div style={{flex:1}}/>
                 <button onClick={()=>setDetId(r.id)} style={{...IB,background:"#eff6ff",color:"#1d4ed8",fontWeight:700,fontSize:12,padding:"5px 10px"}}>🔍</button>
-                <button onClick={()=>{setForm({car_name:r.car_name,car_id:r.car_id||"",client_name:r.client_name,client_phone:r.client_phone||"",client_id_card:r.client_id_card||"",date_from:r.date_from,date_to:r.date_to,pickup_time:r.pickup_time||"10:00",return_time:r.return_time||"10:00",price_per_day:r.price_per_day,currency:r.currency,total_price:r.total_price,status:r.status,payment_status:r.payment_status,notes:r.notes||""});setEditId(r.id);setShowF(true)}} style={{...IB,fontSize:12,padding:"5px 10px"}}>✏️</button>
+                <button onClick={()=>{setForm({car_name:r.car_name,car_id:r.car_id||"",client_name:r.client_name,client_phone:r.client_phone||"",client_id_card:r.client_id_card||"",date_from:r.date_from,date_to:r.date_to,pickup_time:r.pickup_time||"10:00",return_time:r.return_time||"10:00",price_per_day:r.price_per_day,currency:r.currency,total_price:r.total_price,billing_days:diffDays(r.date_from,r.date_to),status:r.status,payment_status:r.payment_status,notes:r.notes||""});setEditId(r.id);setShowF(true)}} style={{...IB,fontSize:12,padding:"5px 10px"}}>✏️</button>
                 {sess.profile?.role==="admin"&&<button onClick={()=>doDel(r.id)} style={{...IB,color:"#dc2626",fontSize:12,padding:"5px 10px"}}>🗑️</button>}
               </div>
             </div>
@@ -2203,12 +2210,8 @@ function ResPage({sess,reload,reloadTick,addLog,onOpenContract}) {
           <Fld label="Ora Marrjes"><input type="time" value={form.pickup_time} onChange={e=>setForm(f=>({...f,pickup_time:e.target.value}))} style={FL}/></Fld>
           <Fld label="Deri Data *"><DateInput value={form.date_to} onChange={v=>setForm(f=>({...f,date_to:v}))}/></Fld>
           <Fld label="Ora Dorëzimit"><input type="time" value={form.return_time} onChange={e=>setForm(f=>({...f,return_time:e.target.value}))} style={FL}/></Fld>
-          <Fld label="— OSE — Sa ditë po e merr klienti (llogarit vetë datën e kthimit)" col2>
-            <input type="number" min="1" value={form.date_from&&nd>0?nd:""} onChange={e=>{
-              const days=Number(e.target.value);
-              if(!form.date_from){ alert("Zgjidh fillimisht 'Nga Data' (data e marrjes)."); return; }
-              if(days>0) setForm(f=>({...f,date_to:addD(f.date_from,days)}));
-            }} style={FL} placeholder="p.sh. 5 (ditë)"/>
+          <Fld label={"Numri i Ditëve (nga datat: "+nd+" · mund ta ndryshosh vetë)"} col2>
+            <input type="number" min="0" value={form.billing_days} onChange={e=>setForm(f=>({...f,billing_days:e.target.value}))} style={FL} placeholder="p.sh. 5"/>
           </Fld>
           <Fld label="Km kur u dha"><input type="number" value={form.km_out||""} onChange={e=>setForm(f=>({...f,km_out:e.target.value}))} style={FL} placeholder="p.sh. 45200"/></Fld>
           <Fld label="Km kur u kthye"><input type="number" value={form.km_in||""} onChange={e=>setForm(f=>({...f,km_in:e.target.value}))} style={FL} placeholder="p.sh. 46800"/></Fld>
@@ -2222,7 +2225,7 @@ function ResPage({sess,reload,reloadTick,addLog,onOpenContract}) {
               🚫 Makina e ZËNË për këto data! {liveConflicts.map(r=>r.client_name+" ("+fmtFull(r.date_from)+" - "+fmtFull(r.date_to)+")").join(", ")} — zgjidh datë tjetër ose makinë tjetër.
             </div>
           )}
-          <Fld label={"Çmim/Ditë ("+nd+" d)"}><input type="number" value={form.price_per_day} onChange={e=>setForm(f=>({...f,price_per_day:e.target.value}))} style={FL}/></Fld>
+          <Fld label={"Çmim/Ditë (faturim: "+(form.billing_days||nd)+" d)"}><input type="number" value={form.price_per_day} onChange={e=>setForm(f=>({...f,price_per_day:e.target.value}))} style={FL}/></Fld>
           <Fld label="Monedha"><select value={form.currency} onChange={e=>setForm(f=>({...f,currency:e.target.value}))} style={FL}><option value="ALL">Lekë</option><option value="EUR">Euro</option></select></Fld>
           <Fld label="Totali *" col2><input type="number" value={form.total_price} onChange={e=>setForm(f=>({...f,total_price:e.target.value}))} style={{...FL,fontWeight:700}}/></Fld>
           {/* Parapagimi */}
