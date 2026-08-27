@@ -2203,6 +2203,13 @@ function ResPage({sess,reload,reloadTick,addLog,onOpenContract}) {
           <Fld label="Ora Marrjes"><input type="time" value={form.pickup_time} onChange={e=>setForm(f=>({...f,pickup_time:e.target.value}))} style={FL}/></Fld>
           <Fld label="Deri Data *"><DateInput value={form.date_to} onChange={v=>setForm(f=>({...f,date_to:v}))}/></Fld>
           <Fld label="Ora Dorëzimit"><input type="time" value={form.return_time} onChange={e=>setForm(f=>({...f,return_time:e.target.value}))} style={FL}/></Fld>
+          <Fld label="— OSE — Sa ditë po e merr klienti (llogarit vetë datën e kthimit)" col2>
+            <input type="number" min="1" value={form.date_from&&nd>0?nd:""} onChange={e=>{
+              const days=Number(e.target.value);
+              if(!form.date_from){ alert("Zgjidh fillimisht 'Nga Data' (data e marrjes)."); return; }
+              if(days>0) setForm(f=>({...f,date_to:addD(f.date_from,days)}));
+            }} style={FL} placeholder="p.sh. 5 (ditë)"/>
+          </Fld>
           <Fld label="Km kur u dha"><input type="number" value={form.km_out||""} onChange={e=>setForm(f=>({...f,km_out:e.target.value}))} style={FL} placeholder="p.sh. 45200"/></Fld>
           <Fld label="Km kur u kthye"><input type="number" value={form.km_in||""} onChange={e=>setForm(f=>({...f,km_in:e.target.value}))} style={FL} placeholder="p.sh. 46800"/></Fld>
           {isPassiveCar&&(
