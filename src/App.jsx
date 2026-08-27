@@ -150,6 +150,9 @@ function fmtD(s) { if(!s) return ""; const d=new Date(s); return String(d.getDat
 function fmtFull(s) { if(!s) return ""; const d=new Date(s); return String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+d.getFullYear(); }
 function fmtDT(s) { if(!s) return ""; const d=new Date(s); return String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+d.getFullYear()+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }
 function fmtM(a,c) { return c==="EUR"?"€"+Number(a).toFixed(2):Number(a).toLocaleString("sq-AL")+" L"; }
+// Shuma "efektive" e paguar: nëse statusi është "paguar", trajtoje si të paguar plotësisht
+// edhe nëse fusha amount_paid nuk është sinkronizuar (rregullon rezervimet e vjetra/të ndryshuara manualisht)
+function effPaid(r) { return r.payment_status==="paguar" ? Number(r.total_price||0) : Number(r.amount_paid||0); }
 function dow(s) { return DAYS_SQ[new Date(s).getDay()]; }
 function isWE(s) { const d=new Date(s).getDay(); return d===0||d===6; }
 function diffDays(a,b) { if(!a||!b) return 0; return Math.max(1,Math.ceil((new Date(b)-new Date(a))/86400000)); }
@@ -2069,6 +2072,11 @@ function ResPage({sess,reload,reloadTick,addLog,onOpenContract}) {
         total_price:Number(form.total_price)||0,
         created_by:sess.profile?.username
       };
+      // Nese pagesa shenohet "Paguar" nga kjo faqe, sinkronizo automatikisht shumen e paguar
+      // (perndryshe raportet e te ardhurave dalin gabim per rezervimet e ndryshuara ketej)
+      if(body.payment_status==="paguar"){
+        body.amount_paid = body.total_price;
+      }
       if(editId){
         await sbAuthPatch("reservations",editId,body,sess.token);
         addLog("Ndrysho Rezervim",form.car_name+" - "+form.client_name);
@@ -2350,8 +2358,8 @@ function FinPage({sess,reload,reloadTick,addLog}) {
         <h3 style={{margin:"0 0 10px",fontSize:mob?12:15,fontWeight:700,color:"#0f172a"}}>🚗 Sipas Makinës</h3>
         {carNames.map(cn=>{
           const carReses=paid.filter(r=>r.car_name===cn);
-          const iL=carReses.filter(r=>r.currency==="ALL").reduce((s,r)=>s+Number(r.amount_paid),0);
-          const iE=carReses.filter(r=>r.currency==="EUR").reduce((s,r)=>s+Number(r.amount_paid),0);
+          const iL=carReses.filter(r=>r.currency==="ALL").reduce((s,r)=>s+effPaid(r),0);
+          const iE=carReses.filter(r=>r.currency==="EUR").reduce((s,r)=>s+effPaid(r),0);
           const eL=exps.filter(e=>e.car_name===cn&&e.currency==="ALL").reduce((s,e)=>s+Number(e.amount),0);
           const eE=exps.filter(e=>e.car_name===cn&&e.currency==="EUR").reduce((s,e)=>s+Number(e.amount),0);
           const totalInc=iL+iE*108;
@@ -2966,8 +2974,8 @@ function CliPage({sess,reload,reloadTick,addLog}) {
     const clReses=reses.filter(r=>r.client_name===cl.name&&r.status!=="Anuluar");
     const fatL=clReses.filter(r=>r.currency==="ALL").reduce((s,r)=>s+Number(r.total_price||0),0);
     const fatE=clReses.filter(r=>r.currency==="EUR").reduce((s,r)=>s+Number(r.total_price||0),0);
-    const payL=clReses.filter(r=>r.currency==="ALL").reduce((s,r)=>s+Number(r.amount_paid||0),0);
-    const payE=clReses.filter(r=>r.currency==="EUR").reduce((s,r)=>s+Number(r.amount_paid||0),0);
+    const payL=clReses.filter(r=>r.currency==="ALL").reduce((s,r)=>s+effPaid(r),0);
+    const payE=clReses.filter(r=>r.currency==="EUR").reduce((s,r)=>s+effPaid(r),0);
     return {count:clReses.length,fatL,fatE,payL,payE,detL:fatL-payL,detE:fatE-payE};
   }
   const filteredFinal=onlyDebt?filtered.filter(cl=>{const s=clientStats(cl);return s.detL>0||s.detE>0;}):filtered;
@@ -3496,8 +3504,8 @@ function CarsReport({cars,reses,exps,view}){
   const carNames=[...new Set(reses.map(r=>r.car_name).concat(exps.map(e=>e.car_name)).concat(cars.map(c=>c.name)))].filter(Boolean);
   function carStats(cn){
     const all=reses.filter(r=>r.car_name===cn);
-    const incL=all.filter(r=>r.currency==="ALL").reduce((s,r)=>s+Number(r.amount_paid||0),0);
-    const incE=all.filter(r=>r.currency==="EUR").reduce((s,r)=>s+Number(r.amount_paid||0),0);
+    const incL=all.filter(r=>r.currency==="ALL").reduce((s,r)=>s+effPaid(r),0);
+    const incE=all.filter(r=>r.currency==="EUR").reduce((s,r)=>s+effPaid(r),0);
     const expL=exps.filter(e=>e.car_name===cn&&e.currency==="ALL").reduce((s,e)=>s+Number(e.amount),0);
     const expE=exps.filter(e=>e.car_name===cn&&e.currency==="EUR").reduce((s,e)=>s+Number(e.amount),0);
     const totalDays=all.reduce((s,r)=>s+diffDays(r.date_from,r.date_to),0);
@@ -3597,8 +3605,8 @@ function ClientsReport({clients,reses,selClient,view}){
     const cr=reses.filter(r=>r.client_name===name);
     const fatL=cr.filter(r=>r.currency==="ALL").reduce((s,r)=>s+Number(r.total_price||0),0);
     const fatE=cr.filter(r=>r.currency==="EUR").reduce((s,r)=>s+Number(r.total_price||0),0);
-    const payL=cr.filter(r=>r.currency==="ALL").reduce((s,r)=>s+Number(r.amount_paid||0),0);
-    const payE=cr.filter(r=>r.currency==="EUR").reduce((s,r)=>s+Number(r.amount_paid||0),0);
+    const payL=cr.filter(r=>r.currency==="ALL").reduce((s,r)=>s+effPaid(r),0);
+    const payE=cr.filter(r=>r.currency==="EUR").reduce((s,r)=>s+effPaid(r),0);
     return {count:cr.length,fatL,fatE,payL,payE,detL:fatL-payL,detE:fatE-payE};
   }
 
