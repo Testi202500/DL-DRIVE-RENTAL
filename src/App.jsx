@@ -739,6 +739,18 @@ function buildContractHTML(c, cars, stage) {
   </div>
   `:""}
 
+  ${c.res_date_from||c.res_date_to?`
+  <div class="section">
+    <div class="section-hd">📅 Periudha e Qirasë <span class="en">/ Rental Period</span></div>
+    <div class="section-bd"><table>
+      ${row("Data e Marrjes / Pickup Date", c.res_date_from?(fmtFull(c.res_date_from)+(c.res_pickup_time?(" · "+c.res_pickup_time):"")):"")}
+      ${row("Data e Kthimit / Return Date", c.res_date_to?(fmtFull(c.res_date_to)+(c.res_return_time?(" · "+c.res_return_time):"")):"")}
+      ${row("Nr. Ditëve / Number of Days", c.res_days||(c.res_date_from&&c.res_date_to?diffDays(c.res_date_from,c.res_date_to):""))}
+      ${row("Çmimi për Ditë / Price per Day", c.res_price_per_day?fmtM(c.res_price_per_day,c.currency):"")}
+    </table></div>
+  </div>
+  `:""}
+
   <div class="section">
     <div class="section-hd">🚗 Marrja e Makinës <span class="en">/ Pickup</span></div>
     <div class="section-bd">
@@ -759,8 +771,9 @@ function buildContractHTML(c, cars, stage) {
     <div class="section-hd">🏁 Kthimi i Makinës <span class="en">/ Drop-off</span></div>
     <div class="section-bd">
       <table>
+        ${row("Kthimi i Planifikuar / Scheduled Return", c.res_date_to?(fmtFull(c.res_date_to)+(c.res_return_time?(" · "+c.res_return_time):"")):"")}
         ${row("Vendndodhja / Location", c.dropoff_location)}
-        ${row("Data/Ora / Date-Time", c.dropoff_datetime?fmtDT(c.dropoff_datetime):"")}
+        ${row("Data/Ora Reale / Actual Date-Time", c.dropoff_datetime?fmtDT(c.dropoff_datetime):"")}
         ${row("Karburanti / Fuel", c.dropoff_fuel)}
         ${row("Km", c.dropoff_km)}
         ${row("Shënime Dëmtimi / Damage Notes", c.dropoff_damage_notes)}
@@ -824,6 +837,10 @@ function ContractEditor({r, sess, cars, addLog, onBack}) {
   const [existing,setExisting] = useState(null);
   const [stage,setStage] = useState("pickup");
 
+  const resDT=(d,t,fb)=>d?(String(d).slice(0,10)+"T"+(t||"10:00").slice(0,5)):fb;
+  const withRes=(obj)=>({...obj,
+    res_date_from:r.date_from, res_date_to:r.date_to, res_pickup_time:r.pickup_time, res_return_time:r.return_time,
+    res_days:Number(r.billing_days)||diffDays(r.date_from,r.date_to), res_price_per_day:r.price_per_day});
   const [f,setF] = useState({
     client_name:r.client_name||"", client_phone:r.client_phone||"", client_id_card:r.client_id_card||"",
     client_email:"", client_address:"", client_city:"", client_pob:"", client_dob:"",
@@ -835,9 +852,9 @@ function ContractEditor({r, sess, cars, addLog, onBack}) {
     theft_deductible:"", damage_deductible:"", third_party_deductible:"",
     insurance_option:"baze", insurance_excess:"400",
     card_holder:"", card_last4:"", card_type:"", card_expiry:"",
-    pickup_location:"", pickup_datetime:new Date().toISOString().slice(0,16),
+    pickup_location:"", pickup_datetime:resDT(r.date_from,r.pickup_time,new Date().toISOString().slice(0,16)),
     pickup_fuel:"8/8 (100%)", pickup_km:r.km_out||"", pickup_damage:[], pickup_damage_notes:"", pickup_signature:"", pickup_photos:[],
-    dropoff_location:"", dropoff_datetime:new Date().toISOString().slice(0,16),
+    dropoff_location:"", dropoff_datetime:resDT(r.date_to,r.return_time,new Date().toISOString().slice(0,16)),
     dropoff_fuel:"8/8 (100%)", dropoff_km:r.km_in||"", dropoff_damage:[], dropoff_damage_notes:"", dropoff_signature:"", dropoff_photos:[],
   });
 
@@ -899,7 +916,7 @@ function ContractEditor({r, sess, cars, addLog, onBack}) {
       else { [saved]=await sbAuthPost("rental_contracts",body,sess.token); }
       setExisting(saved);
       addLog&&addLog("Kontratë Pickup",r.car_name+" - "+r.client_name);
-      printContract(saved,cars,"pickup");
+      printContract(withRes(saved),cars,"pickup");
       setStage("dropoff");
     } catch(e){ alert(e.message); }
     setSaving(false);
@@ -922,7 +939,7 @@ function ContractEditor({r, sess, cars, addLog, onBack}) {
         }
       }
       addLog&&addLog("Kontratë Dropoff",r.car_name+" - "+r.client_name);
-      printContract(saved,cars,"dropoff");
+      printContract(withRes(saved),cars,"dropoff");
     } catch(e){ alert(e.message); }
     setSaving(false);
   }
@@ -1066,7 +1083,7 @@ function ContractEditor({r, sess, cars, addLog, onBack}) {
 
       <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16,marginBottom:30,flexWrap:"wrap"}}>
         <button onClick={saveDraft} disabled={saving} style={{...CB,fontWeight:700}}>{saving?"...":"💾 Ruaj Draft"}</button>
-        <button onClick={()=>printContract({...(existing||{}),...f,reservation_id:r.id,car_name:r.car_name},cars,stage)} style={{...PB,background:"#475569"}}>🖨️ Shiko PDF</button>
+        <button onClick={()=>printContract(withRes({...(existing||{}),...f,reservation_id:r.id,car_name:r.car_name}),cars,stage)} style={{...PB,background:"#475569"}}>🖨️ Shiko PDF</button>
         {stage==="pickup"
           ? <button onClick={confirmPickup} disabled={saving} style={{...PB,background:"#059669"}}>{saving?"⏳...":"✅ Konfirmo Marrjen + PDF"}</button>
           : <button onClick={confirmDropoff} disabled={saving} style={{...PB,background:"#059669"}}>{saving?"⏳...":"✅ Konfirmo Kthimin + PDF"}</button>
